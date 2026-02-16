@@ -141,9 +141,6 @@
     );
   }
 
-  // The key trick:
-  // We increase padding-bottom to "contain" the dropdown inside the rounded/hidden container,
-  // BUT we apply an equal negative margin-bottom so the page content does NOT get pushed down.
   function setExpandedSpace(px, msForTransition) {
     if (!navbarContainer) return;
     const dur =
@@ -175,10 +172,8 @@
 
     window.__navbarAnimationInitialized = true;
 
-    // Detect touch capability
     isTouchDevice = detectTouch();
 
-    // Store original spacing
     const style = getComputedStyle(navbarContainer);
     originalPaddingBottom = style.paddingBottom || "0px";
     originalMarginBottom = style.marginBottom || "0px";
@@ -206,7 +201,6 @@
     bindScrollListener();
     bindResizeListener();
 
-    // Cache dropdown lists AFTER portal is created
     allDropdownLists = Array.from(
       dropdownPortal.querySelectorAll(".navbar_dropdown-list")
     );
@@ -342,7 +336,6 @@
   will-change: background-color, backdrop-filter, padding-bottom, margin-bottom;
 }
 
-/* Navbar content elements - must stack above dropdown portal */
 .navbar_logo-link,
 .navbar_menu,
 .navbar_button-wrapper{
@@ -350,7 +343,6 @@
   z-index: 10;
 }
 
-/* Dropdown portal: absolute inside container, positioned below navbar content */
 .navbar-dropdown-portal{
   position: absolute;
   left: 0;
@@ -363,7 +355,6 @@
   pointer-events: auto;
 }
 
-/* Hidden offscreen container for measuring dropdown heights without visual flash */
 .navbar-measure-container{
   position: absolute !important;
   left: -9999px !important;
@@ -395,7 +386,6 @@
   will-change: opacity;
 }
 
-/* Overlay */
 .nav-page-overlay{
   position: fixed;
   inset: 0;
@@ -414,7 +404,6 @@
   -webkit-backdrop-filter: blur(${CONFIG.overlayBlurPx}px);
 }
 
-/* Toggle radius */
 .navbar_dropdwn-toggle{
   border-radius: ${CONFIG.toggleRadiusPx}px !important;
   cursor: pointer;
@@ -425,7 +414,6 @@
   color: ${CONFIG.appToggleText} !important;
 }
 
-/* Force same background for right/app panes */
 .dropdown-grid-right,
 .dropdown-grid-app,
 .dropdown-left-content-icon-wrapper{
@@ -466,10 +454,8 @@
       navbarContainer.appendChild(dropdownPortal);
     }
 
-    // Position portal at the bottom of the original navbar content
     dropdownPortal.style.top = `${originalNavbarHeight}px`;
 
-    // Move dropdown lists into the portal
     for (let i = 0; i < menuDropdowns.length; i++) {
       const dropdown = menuDropdowns[i];
       const list = dropdown.querySelector(".navbar_dropdown-list");
@@ -480,11 +466,6 @@
     }
   }
 
-  /**
-   * Offscreen container for measuring dropdown heights.
-   * Cloning into this container avoids the fragile inline-style-swap
-   * approach which could flash content if the browser paints mid-measure.
-   */
   function createMeasureContainer() {
     measureContainer = document.createElement("div");
     measureContainer.className = "navbar-measure-container";
@@ -510,9 +491,7 @@
   // EVENTS
   // =============================================
   function bindEvents() {
-    // --- Hover behavior (desktop only) ---
     addTrackedListener(navbarContainer, "pointerleave", (e) => {
-      // Ignore pointer leave on touch — close is handled by tap-outside / overlay
       if (e.pointerType === "touch") return;
       if (!navbarContainer.contains(e.relatedTarget)) {
         requestClose();
@@ -530,14 +509,12 @@
       const list = getListForDropdown(dropdown);
       if (!toggle || !list) continue;
 
-      // Desktop hover intent
       addTrackedListener(toggle, "pointerenter", (e) => {
         if (e.pointerType === "touch") return;
         cancelClose();
         if (!isOpen || currentDropdown !== dropdown) openOrSwitch(dropdown);
       });
 
-      // Click/tap handler — works on both touch and desktop as a toggle
       addTrackedListener(toggle, "click", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -549,7 +526,6 @@
         }
       });
 
-      // Keyboard accessibility
       addTrackedListener(toggle, "keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -563,18 +539,15 @@
       });
     }
 
-    // Global escape
     addTrackedListener(document, "keydown", (e) => {
       if (e.key === "Escape" && isOpen) closeMenu();
     });
 
-    // Close on tap outside navbar (touch devices)
     addTrackedListener(
       document,
       "pointerdown",
       (e) => {
         if (!isOpen) return;
-        // If the tap is outside the navbar container entirely, close
         if (!navbarContainer.contains(e.target) && !pageOverlay.contains(e.target)) {
           closeMenu();
         }
@@ -636,9 +609,7 @@
         clearTimeout(resizeTimeout);
         resizeTimeout = setTimeout(() => {
           dropdownHeightCache = new WeakMap();
-          // Re-detect touch on resize (orientation changes, etc.)
           isTouchDevice = detectTouch();
-          // Recalculate portal position
           if (navbarContainer && dropdownPortal) {
             originalNavbarHeight = navbarContainer.offsetHeight;
             dropdownPortal.style.top = `${originalNavbarHeight}px`;
@@ -678,17 +649,10 @@
   // =============================================
   // MEASURE HEIGHT
   // =============================================
-  /**
-   * Measures dropdown list height using an offscreen clone.
-   * This avoids the fragile pattern of swapping inline styles on
-   * the live element, which can cause a visible flash if the browser
-   * paints between style changes.
-   */
   function measureListHeight(list) {
     const cached = dropdownHeightCache.get(list);
     if (cached !== undefined) return cached;
 
-    // Clone into the offscreen measure container
     const clone = list.cloneNode(true);
     clone.style.cssText =
       "position:relative!important;top:auto!important;opacity:1!important;" +
@@ -771,17 +735,14 @@
 
     pageOverlay.classList.add("is-visible");
 
-    // Expand internally, but cancel layout impact with equal negative margin-bottom
     setExpandedSpace(dropdownHeight, CONFIG.openMs);
 
-    // Fade in list content
     const dur = `${CONFIG.openMs}ms`;
     const ease = CONFIG.ease;
     list.style.transition = `opacity ${dur} ${ease}`;
     list.style.opacity = "1";
   }
 
-  // Morphable content selectors (elements that should crossfade individually)
   const MORPH_SELECTORS = [
     ".dropdown-grid-left",
     ".dropdown-grid-right",
@@ -815,23 +776,18 @@
     const dur = `${CONFIG.switchMs}ms`;
     const ease = CONFIG.ease;
 
-    // Get morphable elements from both lists
     const prevElements = prevList ? getMorphableElements(prevList) : {};
     const nextElements = getMorphableElements(nextList);
 
-    // Immediately disable pointer events on previous list
-    // to prevent the fading-out list from intercepting clicks
     if (prevList) {
       prevList.style.pointerEvents = "none";
     }
 
-    // Prepare next list — visible but content hidden
     nextList.style.transition = "none";
     nextList.style.opacity = "1";
     nextList.style.visibility = "visible";
     nextList.style.pointerEvents = "auto";
 
-    // Hide next list's morphable content initially
     for (const selector in nextElements) {
       const el = nextElements[selector];
       el.style.transition = "none";
@@ -840,7 +796,6 @@
 
     void nextList.offsetHeight;
 
-    // Crossfade morphable elements
     for (const selector in prevElements) {
       const prevEl = prevElements[selector];
       prevEl.style.transition = `opacity ${dur} ${ease}`;
@@ -853,13 +808,11 @@
       nextEl.style.opacity = "1";
     }
 
-    // If prev list has no matching morphable elements, fade whole list
     if (prevList && Object.keys(prevElements).length === 0) {
       prevList.style.transition = `opacity ${dur} ${ease}`;
       prevList.style.opacity = "0";
     }
 
-    // Chevron animations
     if (prevDropdown) {
       const prevChevron = prevDropdown.querySelector(".dropdown-chevron");
       if (prevChevron) {
@@ -877,14 +830,12 @@
       nextChevron.style.transform = "rotate(180deg)";
     }
 
-    // Ensure theme + highlight updates
     const toggleTransition = `background-color ${dur} ${ease}, color ${dur} ${ease}`;
     for (let i = 0; i < allToggles.length; i++) {
       allToggles[i].style.transition = toggleTransition;
     }
     applyTheme();
 
-    // Update portal height and internal expansion (still no layout impact)
     dropdownPortal.style.transition = `height ${dur} ${ease}`;
     dropdownPortal.style.height = `${nextDropdownHeight}px`;
     setExpandedSpace(nextDropdownHeight, CONFIG.switchMs);
@@ -896,14 +847,12 @@
     const listToClean = prevList;
     const prevElementsToReset = { ...prevElements };
     switchTimeout = setTimeout(() => {
-      // Reset previous list
       if (listToClean && currentList !== listToClean) {
         listToClean.style.transition = "none";
         listToClean.style.opacity = "0";
         listToClean.style.visibility = "hidden";
         listToClean.style.pointerEvents = "none";
 
-        // Reset morphable elements opacity for next time
         for (const selector in prevElementsToReset) {
           const el = prevElementsToReset[selector];
           if (el) {
@@ -913,7 +862,6 @@
         }
       }
 
-      // Remove portal height transition
       dropdownPortal.style.transition = "none";
       switchTimeout = null;
     }, CONFIG.switchMs + 50);
@@ -954,12 +902,8 @@
         ?.setAttribute("aria-expanded", "false");
     }
 
-    // Collapse internal expansion and restore layout spacing
     setExpandedSpace(0, CONFIG.closeMs);
 
-    // Single timeout-based cleanup — more reliable than transitionend
-    // which can be missed if the element is detached, has zero duration,
-    // or the specific property never fires.
     closeFallbackTimeout = setTimeout(() => {
       closeFallbackTimeout = null;
       if (!isOpen) {
@@ -980,7 +924,6 @@
     cancelPendingAnimations();
     clearTimeout(resizeTimeout);
 
-    // Move dropdown lists back to their original parents
     dropdownListMap.forEach((list, dropdown) => {
       if (list && dropdown && list.parentNode === dropdownPortal) {
         dropdown.appendChild(list);
@@ -1016,7 +959,6 @@
       measureContainer.parentNode.removeChild(measureContainer);
     }
 
-    // Reset navbar container spacing
     if (navbarContainer) {
       navbarContainer.style.paddingBottom = originalPaddingBottom;
       navbarContainer.style.marginBottom = originalMarginBottom;
@@ -1080,7 +1022,9 @@
 })();
 
 
-
+/* ═══════════════════════════════════════════════
+   MOBILE NAV — ≤991px
+   ═══════════════════════════════════════════════ */
 
 (() => {
   "use strict";
@@ -1115,7 +1059,6 @@
   let guardObservers = false;
   let allowNextClick = false;
 
-  /* Dropdown reset functions collected here */
   const dropdownResets = [];
 
   /* ── Helpers ─────────────────────────────────── */
@@ -1243,8 +1186,6 @@
 
   /* ── Dropdown slide animation base ──────────── */
 
-  /* Force lists into the flow so we can animate height.
-     Visibility is controlled via max-height + overflow. */
   .navbar_menu .navbar_dropdown-list {
     display: block !important;
     max-height: 0px !important;
@@ -1255,6 +1196,16 @@
   .navbar_menu .dropdown-chevron {
     transition: transform ${DD_OPEN_MS}ms ${DD_EASE} !important;
     will-change: transform;
+  }
+
+  /* Lock dropdown colors — prevent Webflow w--open from
+     triggering any color shift on open/close */
+  .navbar_menu .navbar_dropdwn-toggle,
+  .navbar_menu .navbar_dropdwn-toggle *,
+  .navbar_menu .navbar_dropdown-list,
+  .navbar_menu .navbar_dropdown-list * {
+    color: inherit !important;
+    background-color: inherit !important;
   }
 }
   `.trim();
@@ -1568,9 +1519,6 @@
         clearTimeout(ddTimeout);
 
         if (ddOpen) {
-          /* ── Opening ───────────────────────────── */
-
-          // Snap to 0 without transition so we can measure.
           list.style.setProperty("transition", "none", "important");
           list.style.setProperty("max-height", "0px", "important");
           list.style.setProperty("overflow", "hidden", "important");
@@ -1578,7 +1526,6 @@
 
           const h = list.scrollHeight;
 
-          // Animate to measured height.
           list.style.setProperty(
             "transition",
             `max-height ${DD_OPEN_MS}ms ${DD_EASE}`,
@@ -1586,7 +1533,6 @@
           );
           list.style.setProperty("max-height", h + "px", "important");
 
-          // Rotate chevron.
           if (chevron) {
             chevron.style.setProperty(
               "transition",
@@ -1596,25 +1542,18 @@
             chevron.style.setProperty("transform", "rotate(180deg)", "important");
           }
 
-          // After animation, set max-height to none so content isn't clipped
-          // if it changes dynamically.
           ddTimeout = setTimeout(() => {
             list.style.setProperty("max-height", "none", "important");
             list.style.removeProperty("overflow");
           }, DD_OPEN_MS + 20);
 
         } else {
-          /* ── Closing ───────────────────────────── */
-
-          // Snap max-height to current actual height (from "none") so the
-          // transition has a concrete start value.
           const h = list.scrollHeight;
           list.style.setProperty("transition", "none", "important");
           list.style.setProperty("max-height", h + "px", "important");
           list.style.setProperty("overflow", "hidden", "important");
           void list.offsetHeight;
 
-          // Animate to 0.
           list.style.setProperty(
             "transition",
             `max-height ${DD_CLOSE_MS}ms ${DD_EASE}`,
@@ -1622,7 +1561,6 @@
           );
           list.style.setProperty("max-height", "0px", "important");
 
-          // Rotate chevron back.
           if (chevron) {
             chevron.style.setProperty(
               "transition",
