@@ -1152,6 +1152,18 @@
   .navbar_container.is-mobile-dark .navbar_dropdwn-toggle {
     color: #ffffff !important;
   }
+
+  /* Button color sync */
+.navbar_container .button.is-mobile {
+  transition: color ${CLOSE_MS}ms ${EASE}, background-color ${CLOSE_MS}ms ${EASE}, border-color ${CLOSE_MS}ms ${EASE} !important;
+}
+.navbar_container.is-mobile-dark .button.is-mobile {
+  color: #fff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+.navbar_container.is-mobile-opening .button.is-mobile {
+  transition: color ${OPEN_MS}ms ${EASE}, background-color ${OPEN_MS}ms ${EASE}, border-color ${OPEN_MS}ms ${EASE} !important;
+}
   .navbar_container.is-mobile-opening .navbar_logo,
   .navbar_container.is-mobile-opening .navbar_link,
   .navbar_container.is-mobile-opening .navbar_dropdwn-toggle {
