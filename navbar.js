@@ -1592,3 +1592,20 @@
   applyScrollState();
   neutralizeMenuTransform();
 })();
+
+(() => {
+  const btn = document.querySelector(".navbar_container .button.is-mobile");
+  if (!btn) return;
+
+  const ua = navigator.userAgent || "";
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+  const isAndroid = /Android/i.test(ua);
+
+  if (isIOS) {
+    btn.href = "https://apps.apple.com/us/app/watch-duty-wildfire/id1574452924";
+  } else if (isAndroid) {
+    btn.href = "https://play.google.com/store/apps/details?id=org.watchduty.app";
+  } else {
+    btn.href = "https://app.watchduty.org/";
+  }
+})();
