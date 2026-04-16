@@ -1141,14 +1141,17 @@
 
   const MOBILE_MAX = SHARED.MOBILE_MAX;
   const SCROLL_THRESHOLD = SHARED.SCROLL_THRESHOLD;
-  const EASE = SHARED.EASE;
-  const BASE_OPEN_MS = SHARED.OPEN_MS;
-  const BASE_CLOSE_MS = SHARED.CLOSE_MS;
 
-  // Dropdown animation config
-  const BASE_DD_OPEN_MS = 450;
-  const BASE_DD_CLOSE_MS = 350;
-  const DD_EASE = "cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+  // ── MOBILE-TUNED TIMINGS ────────────────────────
+  // Faster than desktop (850/550) — mobile users expect snap
+  const EASE = "cubic-bezier(0.32, 0.72, 0, 1)"; // Apple-style out-cubic
+  const BASE_OPEN_MS = 320;
+  const BASE_CLOSE_MS = 260;
+
+  // Dropdown animation — even snappier, same ease
+  const BASE_DD_OPEN_MS = 280;
+  const BASE_DD_CLOSE_MS = 220;
+  const DD_EASE = EASE;
 
   let OPEN_MS = BASE_OPEN_MS;
   let CLOSE_MS = BASE_CLOSE_MS;
@@ -1185,11 +1188,13 @@
   let closeTimeout = null;
   let openTimeout = null;
   let guardObservers = false;
-  let allowNextClick = false;
+
+  // Track last pointerdown time to dedupe the synthetic click that follows
+  let lastPointerDownAt = 0;
+  const CLICK_DEDUPE_MS = 500;
 
   const dropdownResets = [];
 
-  // Track observers and listeners for cleanup
   const observers = [];
   const trackedListeners = [];
 
@@ -1207,10 +1212,6 @@
   // Helpers
   function isMobile() {
     return window.innerWidth <= MOBILE_MAX;
-  }
-
-  function isLocked() {
-    return state === STATE.OPENING || state === STATE.CLOSING;
   }
 
   function neutralizeMenuTransform() {
@@ -1242,6 +1243,9 @@
   }
 
   // Injected Stylesheet
+  // KEY CHANGE: All color-changing elements inside the menu (navbar bg, links,
+  // dropdown toggles, dropdown lists) share the SAME duration/ease so everything
+  // animates together. Open state uses OPEN_MS, close state uses CLOSE_MS.
   let styleEl = null;
   function refreshStyles() {
     const existing = document.getElementById("mobile-nav-styles");
@@ -1259,6 +1263,43 @@
     box-sizing: border-box !important;
   }
 
+  /* ── SYNC: all bg/color transitions use same duration ── */
+  .navbar_component,
+  .navbar_container,
+  .navbar_logo,
+  .navbar_link,
+  .navbar_dropdwn-toggle,
+  .navbar_container .button.is-mobile,
+  .menu-icon,
+  .menu-icon_line-top,
+  .menu-icon_line-middle,
+  .menu-icon_line-bottom,
+  .navbar_dropdown-list,
+  .navbar_dropdown-list * {
+    transition:
+      background-color ${CLOSE_MS}ms ${EASE},
+      color ${CLOSE_MS}ms ${EASE},
+      border-color ${CLOSE_MS}ms ${EASE} !important;
+  }
+
+  /* Opening state — everything uses OPEN_MS instead */
+  .navbar_container.is-mobile-opening,
+  .navbar_container.is-mobile-opening .navbar_logo,
+  .navbar_container.is-mobile-opening .navbar_link,
+  .navbar_container.is-mobile-opening .navbar_dropdwn-toggle,
+  .navbar_container.is-mobile-opening .button.is-mobile,
+  .navbar_container.is-mobile-opening .menu-icon,
+  .navbar_container.is-mobile-opening .menu-icon_line-top,
+  .navbar_container.is-mobile-opening .menu-icon_line-middle,
+  .navbar_container.is-mobile-opening .menu-icon_line-bottom,
+  .navbar_component.is-mobile-open {
+    transition:
+      background-color ${OPEN_MS}ms ${EASE},
+      color ${OPEN_MS}ms ${EASE},
+      border-color ${OPEN_MS}ms ${EASE} !important;
+  }
+
+  /* Base (closed/top) appearance */
   .navbar_component {
     border: none !important;
     border-bottom: none !important;
@@ -1266,72 +1307,42 @@
     outline: none !important;
     background-color: transparent !important;
     transform: none !important;
-    transition: background-color ${CLOSE_MS}ms ${EASE} !important;
   }
+
+  /* Dark state — applied when menu open OR scrolled */
   .navbar_component.is-mobile-open {
     background-color: #000 !important;
-    transition: background-color ${OPEN_MS}ms ${EASE} !important;
   }
-
-  .navbar_container {
-    transition: background-color ${CLOSE_MS}ms ${EASE} !important;
-  }
-  .navbar_container.is-mobile-dark { background-color: #000 !important; }
-  .navbar_container.is-mobile-opening {
-    transition: background-color ${OPEN_MS}ms ${EASE} !important;
-  }
-
-  .navbar_logo,
-  .navbar_link,
-  .navbar_dropdwn-toggle {
-    transition: color ${CLOSE_MS}ms ${EASE} !important;
+  .navbar_container.is-mobile-dark {
+    background-color: #000 !important;
   }
   .navbar_container.is-mobile-dark .navbar_logo,
   .navbar_container.is-mobile-dark .navbar_link,
   .navbar_container.is-mobile-dark .navbar_dropdwn-toggle {
     color: #ffffff !important;
   }
-
-  .navbar_container .button.is-mobile {
-    transition: color ${CLOSE_MS}ms ${EASE}, background-color ${CLOSE_MS}ms ${EASE}, border-color ${CLOSE_MS}ms ${EASE} !important;
-  }
   .navbar_container.is-mobile-dark .button.is-mobile {
     color: #fff !important;
     border-color: rgba(255, 255, 255, 0.2) !important;
   }
-  .navbar_container.is-mobile-opening .button.is-mobile {
-    transition: color ${OPEN_MS}ms ${EASE}, background-color ${OPEN_MS}ms ${EASE}, border-color ${OPEN_MS}ms ${EASE} !important;
-  }
-  .navbar_container.is-mobile-opening .navbar_logo,
-  .navbar_container.is-mobile-opening .navbar_link,
-  .navbar_container.is-mobile-opening .navbar_dropdwn-toggle {
-    transition: color ${OPEN_MS}ms ${EASE} !important;
-  }
-
-  .menu-icon {
-    transition: background-color ${CLOSE_MS}ms ${EASE} !important;
-  }
-  .navbar_container.is-mobile-dark .menu-icon { background-color: #202020 !important; }
-  .navbar_container.is-mobile-opening .menu-icon {
-    transition: background-color ${OPEN_MS}ms ${EASE} !important;
-  }
-
-  .menu-icon_line-top,
-  .menu-icon_line-middle,
-  .menu-icon_line-bottom {
-    transition: background-color ${CLOSE_MS}ms ${EASE} !important;
+  .navbar_container.is-mobile-dark .menu-icon {
+    background-color: #202020 !important;
   }
   .navbar_container.is-mobile-dark .menu-icon_line-top,
   .navbar_container.is-mobile-dark .menu-icon_line-middle,
   .navbar_container.is-mobile-dark .menu-icon_line-bottom {
     background-color: #fff !important;
   }
-  .navbar_container.is-mobile-opening .menu-icon_line-top,
-  .navbar_container.is-mobile-opening .menu-icon_line-middle,
-  .navbar_container.is-mobile-opening .menu-icon_line-bottom {
-    transition: background-color ${OPEN_MS}ms ${EASE} !important;
+
+  /* Menu fade uses same OPEN_MS / CLOSE_MS — stays in sync */
+  .navbar_menu {
+    transition: opacity ${CLOSE_MS}ms ${EASE} !important;
+  }
+  .navbar_component.is-mobile-open .navbar_menu {
+    transition: opacity ${OPEN_MS}ms ${EASE} !important;
   }
 
+  /* Dropdown slide */
   .navbar_menu .navbar_dropdown-list {
     display: block !important;
     max-height: 0px !important;
@@ -1342,6 +1353,7 @@
     will-change: transform;
   }
 
+  /* Lock dropdown colors — prevent Webflow w--open from shifting them */
   .navbar_menu .navbar_dropdwn-toggle,
   .navbar_menu .navbar_dropdwn-toggle *,
   .navbar_menu .navbar_dropdown-list,
@@ -1349,13 +1361,19 @@
     color: inherit !important;
     background-color: inherit !important;
   }
+
+  /* Tappable targets need no tap-highlight flash */
+  .w-nav-button,
+  .navbar_dropdwn-toggle {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
 }
     `.trim();
     document.head.appendChild(styleEl);
   }
   refreshStyles();
 
-  // Live motion-preference sync
   motionQuery?.addEventListener?.("change", applyMotion);
 
   // Hide / Cleanup
@@ -1392,14 +1410,11 @@
     clearAllTimers();
     state = STATE.CLOSED;
     guardObservers = false;
-    allowNextClick = false;
     navbarComponent?.classList.remove("is-mobile-open");
     navbarContainer.classList.remove("is-mobile-opening");
     resetAllDropdowns();
     stripAllInlineStyles();
     body.style.overflow = "";
-
-    // Preserve scroll-based dark state even after breakpoint crossing
     applyScrollState();
   }
 
@@ -1422,11 +1437,13 @@
     ).observe(navbarMenu, { attributes: true, attributeFilter: ["style"] });
   }
 
-  // Open
+  // ── OPEN ──────────────────────────────────────
+  // Interruptible: if called during CLOSING, snaps to OPENING mid-animation
   function openMobileMenu() {
-    if (state !== STATE.CLOSED) return;
+    if (state === STATE.OPEN || state === STATE.OPENING) return;
 
     clearAllTimers();
+    const wasClosing = state === STATE.CLOSING;
     state = STATE.OPENING;
     body.style.overflow = "hidden";
 
@@ -1440,23 +1457,31 @@
     navbarComponent.classList.add("is-mobile-open");
     navbarContainer.classList.add("is-mobile-dark", "is-mobile-opening");
 
-    requestAnimationFrame(() => {
-      if (state !== STATE.OPENING) return;
+    if (navbarMenu) {
+      navbarMenu.style.setProperty("pointer-events", "auto");
 
-      if (navbarMenu) {
-        navbarMenu.style.setProperty("opacity", "0", "important");
-        navbarMenu.style.setProperty("pointer-events", "auto");
+      if (wasClosing) {
+        // Interrupt: keep current opacity, just retarget to 1
+        // Computed style captures wherever the animation currently is
+        const currentOpacity = getComputedStyle(navbarMenu).opacity;
+        navbarMenu.style.setProperty("transition", "none", "important");
+        navbarMenu.style.setProperty("opacity", currentOpacity, "important");
         void navbarMenu.offsetHeight;
-        navbarMenu.style.setProperty(
-          "transition",
-          `opacity ${OPEN_MS}ms ${EASE}`,
-          "important"
-        );
-        navbarMenu.style.setProperty("opacity", "1", "important");
+      } else {
+        navbarMenu.style.setProperty("opacity", "0", "important");
+        void navbarMenu.offsetHeight;
       }
-      neutralizeMenuTransform();
-      requestAnimationFrame(neutralizeMenuTransform);
-    });
+
+      navbarMenu.style.setProperty(
+        "transition",
+        `opacity ${OPEN_MS}ms ${EASE}`,
+        "important"
+      );
+      navbarMenu.style.setProperty("opacity", "1", "important");
+    }
+
+    neutralizeMenuTransform();
+    requestAnimationFrame(neutralizeMenuTransform);
 
     openTimeout = setTimeout(() => {
       if (state !== STATE.OPENING) return;
@@ -1464,11 +1489,13 @@
     }, OPEN_MS);
   }
 
-  // Close
+  // ── CLOSE ─────────────────────────────────────
+  // Interruptible: if called during OPENING, snaps to CLOSING mid-animation
   function closeMobileMenu() {
-    if (state !== STATE.OPEN) return;
+    if (state === STATE.CLOSED || state === STATE.CLOSING) return;
 
     clearAllTimers();
+    const wasOpening = state === STATE.OPENING;
     state = STATE.CLOSING;
     body.style.overflow = "hidden";
 
@@ -1480,26 +1507,29 @@
     if (navbarMenu) {
       neutralizeMenuTransform();
       navbarMenu.style.setProperty("pointer-events", "none");
+
+      if (wasOpening) {
+        // Interrupt: capture current opacity mid-open, reverse to 0
+        const currentOpacity = getComputedStyle(navbarMenu).opacity;
+        navbarMenu.style.setProperty("transition", "none", "important");
+        navbarMenu.style.setProperty("opacity", currentOpacity, "important");
+        void navbarMenu.offsetHeight;
+      } else {
+        navbarMenu.style.setProperty("opacity", "1", "important");
+        void navbarMenu.offsetHeight;
+      }
+
       navbarMenu.style.setProperty(
         "transition",
         `opacity ${CLOSE_MS}ms ${EASE}`,
         "important"
       );
-      navbarMenu.style.setProperty("opacity", "1", "important");
-      void navbarMenu.offsetHeight;
-    } else {
-      void navbarContainer.offsetHeight;
+      navbarMenu.style.setProperty("opacity", "0", "important");
     }
 
     navbarComponent.classList.remove("is-mobile-open");
     navbarContainer.classList.remove("is-mobile-opening");
-    // Keep is-mobile-dark through the close animation so the menu's
-    // fade-out and the bg color transition don't overlap. Dark is
-    // released inside the closeTimeout once state is fully CLOSED.
-
-    if (navbarMenu) {
-      navbarMenu.style.setProperty("opacity", "0", "important");
-    }
+    if (!isScrolled) navbarContainer.classList.remove("is-mobile-dark");
 
     guardObservers = false;
 
@@ -1510,56 +1540,46 @@
       body.style.overflow = navButton.classList.contains("w--open")
         ? "hidden"
         : "";
+    }, CLOSE_MS + 20);
+  }
 
-      // Menu fully gone — now sync dark state to scroll position
-      if (!isScrolled) {
-        navbarContainer.classList.remove("is-mobile-dark");
-      }
-    }, CLOSE_MS + 50);
+  function toggleMobileMenu() {
+    if (state === STATE.OPEN || state === STATE.OPENING) {
+      closeMobileMenu();
+    } else {
+      openMobileMenu();
+    }
   }
 
   // Scroll State
-  // Dark state is locked ON whenever the menu is in any animating or
-  // open phase. Scroll-based toggling only applies when fully closed.
-  // This prevents iOS viewport changes (address-bar collapse) from
-  // restarting the bg-color transition mid-animation.
   function applyScrollState() {
     if (!isMobile()) return;
-
-    const menuEngaged =
-      state === STATE.OPEN ||
-      state === STATE.OPENING ||
-      state === STATE.CLOSING;
-
     const menuOpen = state === STATE.OPEN || state === STATE.OPENING;
-    const dark = menuEngaged || isScrolled;
-
+    const dark = menuOpen || isScrolled;
     navbarComponent?.classList.toggle("is-mobile-open", menuOpen);
     navbarContainer.classList.toggle("is-mobile-dark", dark);
     navbarContainer.classList.toggle("is-mobile-opening", menuOpen);
   }
 
-  // Event Listeners (tracked for cleanup)
+  // ── EVENT LISTENERS ───────────────────────────
+  // pointerdown is the primary trigger — no 300ms tap delay.
+  // click is the fallback for non-touch (mouse in responsive preview).
   addTrackedListener(
     navButton,
     "pointerdown",
     (e) => {
       if (!isMobile()) return;
 
-      if (isLocked()) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        allowNextClick = false;
-        return;
-      }
+      // Only primary button / primary touch
+      if (e.button !== undefined && e.button !== 0) return;
 
-      if (state === STATE.OPEN) {
-        closeMobileMenu();
-        allowNextClick = true;
-      } else if (state === STATE.CLOSED) {
-        lockOverlayAlive();
-        allowNextClick = true;
-      }
+      lastPointerDownAt = Date.now();
+
+      // Fire immediately — interruption logic handles in-flight animations
+      toggleMobileMenu();
+
+      // Stop Webflow's default handler from also firing on the synthetic click
+      e.preventDefault();
     },
     { capture: true }
   );
@@ -1570,26 +1590,27 @@
     (e) => {
       if (!isMobile()) return;
 
-      if (allowNextClick) {
-        allowNextClick = false;
+      // If this click follows a pointerdown we just handled, swallow it
+      if (Date.now() - lastPointerDownAt < CLICK_DEDUPE_MS) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         return;
       }
 
+      // Mouse-only path (no prior pointerdown) — treat as toggle
       e.preventDefault();
-      // Intentionally stopImmediatePropagation — we own this button's click
-      // behavior and block Webflow's default toggle from re-triggering.
       e.stopImmediatePropagation();
+      toggleMobileMenu();
     },
     { capture: true }
   );
 
-  // Pointercancel safety — if the browser takes over the gesture (scroll,
-  // system UI), reset any optimistic state we set in pointerdown.
+  // Clean up stale pointerdown flag if gesture is canceled
   addTrackedListener(
     navButton,
     "pointercancel",
     () => {
-      allowNextClick = false;
+      lastPointerDownAt = 0;
     },
     { capture: true }
   );
@@ -1600,7 +1621,7 @@
       "click",
       (e) => {
         if (!isMobile()) return;
-        if (state !== STATE.OPEN) return;
+        if (state !== STATE.OPEN && state !== STATE.OPENING) return;
         if (e.target.closest("a[href]")) closeMobileMenu();
       },
       true
@@ -1613,18 +1634,17 @@
       "pointerdown",
       (e) => {
         if (!isMobile()) return;
-        if (state !== STATE.OPEN) return;
+        if (state !== STATE.OPEN && state !== STATE.OPENING) return;
         if (e.target === navOverlay) closeMobileMenu();
       },
       true
     );
   }
 
-  // Webflow State Sync
+  // Webflow State Sync — observe w--open class on nav button
+  // (only acts when state is terminal, so our own toggles aren't fought)
   trackObserver(
     new MutationObserver(() => {
-      if (isLocked()) return;
-
       const nowOpen = navButton.classList.contains("w--open");
       body.style.overflow =
         nowOpen || state === STATE.CLOSING ? "hidden" : "";
@@ -1652,16 +1672,7 @@
       requestAnimationFrame(() => {
         const was = isScrolled;
         isScrolled = window.scrollY > SCROLL_THRESHOLD;
-
-        // Skip class thrashing during active menu animation —
-        // iOS fires scroll events during address-bar collapse
-        // which otherwise restart the bg-color transition
-        const menuEngaged =
-          state === STATE.OPEN ||
-          state === STATE.OPENING ||
-          state === STATE.CLOSING;
-
-        if (was !== isScrolled && !menuEngaged) applyScrollState();
+        if (was !== isScrolled) applyScrollState();
         scrollTicking = false;
       });
     },
@@ -1672,23 +1683,13 @@
   addTrackedListener(window, "resize", () => {
     if (!isMobile()) {
       clearMobileStyles();
-      return;
+    } else {
+      neutralizeMenuTransform();
+      applyScrollState();
     }
-
-    neutralizeMenuTransform();
-
-    // Skip applyScrollState during active menu animation —
-    // iOS fires resize events during address-bar collapse which
-    // otherwise thrash the bg-color transition
-    const menuEngaged =
-      state === STATE.OPEN ||
-      state === STATE.OPENING ||
-      state === STATE.CLOSING;
-
-    if (!menuEngaged) applyScrollState();
   });
 
-  // Dropdown Slide Animations
+  // ── DROPDOWN SLIDE ANIMATIONS ────────────────
   if (navbarMenu) {
     const allDropdowns = navbarMenu.querySelectorAll(".navbar_menu-dropdown");
 
@@ -1793,7 +1794,7 @@
   applyScrollState();
   neutralizeMenuTransform();
 
-  // Destroy (for Webflow Editor re-execution / SPA navigation)
+  // Destroy
   window.__mobileNavDestroy = function destroy() {
     clearAllTimers();
 
@@ -1820,6 +1821,8 @@
     window.__mobileNavInitialized = false;
   };
 })();
+
+
 
 
 /* ═══════════════════════════════════════════════
