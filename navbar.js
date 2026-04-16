@@ -1,5 +1,32 @@
+/* ═══════════════════════════════════════════════
+   WATCH DUTY NAVBAR
+   Desktop portal dropdowns + mobile full-viewport menu
+   ═══════════════════════════════════════════════ */
+
+/* ───────────────────────────────────────────────
+   SHARED CONSTANTS
+   ─────────────────────────────────────────────── */
+(() => {
+  "use strict";
+  if (window.__watchDutyNavShared) return;
+  window.__watchDutyNavShared = {
+    DESKTOP_MIN: 992,
+    MOBILE_MAX: 991,
+    SCROLL_THRESHOLD: 48,
+    EASE: "cubic-bezier(0.86, 0, 0.07, 1)",
+    OPEN_MS: 850,
+    CLOSE_MS: 550,
+  };
+})();
+
+/* ═══════════════════════════════════════════════
+   DESKTOP NAV — ≥992px
+   ═══════════════════════════════════════════════ */
+
 (function () {
   "use strict";
+
+  const SHARED = window.__watchDutyNavShared;
 
   // Prevent double initialization in Webflow
   if (window.__navbarAnimationInitialized) {
@@ -10,42 +37,35 @@
   // CONFIGURATION
   // =============================================
   const CONFIG = {
-    scrollThreshold: 48,
+    scrollThreshold: SHARED.SCROLL_THRESHOLD,
     maxWidth: "84rem",
 
     borderRadius: "var(--_ui-styles---radius--xlarge)",
     borderRadiusPx: 20,
 
-    ease: "cubic-bezier(0.86, 0, 0.07, 1)",
-    openMs: 850,
-    closeMs: 550,
+    ease: SHARED.EASE,
+    openMs: SHARED.OPEN_MS,
+    closeMs: SHARED.CLOSE_MS,
     switchMs: 450,
 
-    // Overlay
     overlayOpacity: 0.72,
     overlayBlurPx: 14,
 
-    // Navbar backdrop blur
     navbarBlur: {
       top: "0px",
       scrolled: "12px",
       open: "16px",
     },
 
-    // Hover intent
     closeDelayMs: 120,
 
-    // App toggle hard rules
     appToggleBg: "var(--_primitives---colors--accent-primary)",
     appToggleText: "#1a1a1a",
 
-    // Toggle border radius
     toggleRadiusPx: 12,
 
-    // Touch breakpoint (max-width for touch/mobile behavior)
-    touchBreakpoint: 991,
+    touchBreakpoint: SHARED.MOBILE_MAX,
 
-    // Close fallback buffer (ms added to animation duration for safety)
     closeFallbackBuffer: 150,
 
     colors: {
@@ -64,17 +84,42 @@
     },
   };
 
-  // Reduced motion
-  const prefersReducedMotion = window.matchMedia?.(
-    "(prefers-reduced-motion: reduce)"
-  ).matches;
-  if (prefersReducedMotion) {
-    CONFIG.openMs = 0;
-    CONFIG.closeMs = 0;
-    CONFIG.switchMs = 0;
-    CONFIG.overlayBlurPx = 0;
-    CONFIG.navbarBlur = { top: "0px", scrolled: "0px", open: "0px" };
+  // Store baseline values so prefers-reduced-motion can toggle live
+  const BASE_TIMINGS = {
+    openMs: CONFIG.openMs,
+    closeMs: CONFIG.closeMs,
+    switchMs: CONFIG.switchMs,
+    overlayBlurPx: CONFIG.overlayBlurPx,
+    navbarBlur: { ...CONFIG.navbarBlur },
+  };
+
+  const motionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+
+  function applyMotionPreference() {
+    if (motionQuery?.matches) {
+      CONFIG.openMs = 0;
+      CONFIG.closeMs = 0;
+      CONFIG.switchMs = 0;
+      CONFIG.overlayBlurPx = 0;
+      CONFIG.navbarBlur = { top: "0px", scrolled: "0px", open: "0px" };
+    } else {
+      CONFIG.openMs = BASE_TIMINGS.openMs;
+      CONFIG.closeMs = BASE_TIMINGS.closeMs;
+      CONFIG.switchMs = BASE_TIMINGS.switchMs;
+      CONFIG.overlayBlurPx = BASE_TIMINGS.overlayBlurPx;
+      CONFIG.navbarBlur = { ...BASE_TIMINGS.navbarBlur };
+    }
   }
+  applyMotionPreference();
+
+  // Re-apply on live OS-level toggle
+  motionQuery?.addEventListener?.("change", () => {
+    applyMotionPreference();
+    if (window.__navbarAnimationInitialized) {
+      // Refresh injected styles so overlay blur / radii pick up new values
+      injectStyles?.();
+    }
+  });
 
   // =============================================
   // STATE
@@ -93,31 +138,24 @@
   let smoothScrollInstance = null;
   let smoothScrollUnsub = null;
 
-  // Store original spacing
   let originalPaddingBottom = null;
   let originalMarginBottom = null;
   let originalNavbarHeight = null;
 
-  // Cleanup tracking
   let boundEventListeners = [];
   let styleElement = null;
 
-  // Dropdown to list mapping
   let dropdownListMap = new Map();
 
-  // Scroll optimization
   let lastScrollY = 0;
   let scrollTicking = false;
 
-  // Height cache
   let dropdownHeightCache = new WeakMap();
   let resizeTimeout = null;
 
-  // Animation state tracking
   let switchTimeout = null;
   let closeFallbackTimeout = null;
 
-  // Touch detection
   let isTouchDevice = false;
 
   // =============================================
@@ -174,42 +212,64 @@
 
     isTouchDevice = detectTouch();
 
-    const style = getComputedStyle(navbarContainer);
-    originalPaddingBottom = style.paddingBottom || "0px";
-    originalMarginBottom = style.marginBottom || "0px";
-    originalNavbarHeight = navbarContainer.offsetHeight;
-
-    menuDropdowns = Array.from(
-      document.querySelectorAll(".navbar_menu-dropdown")
-    );
-    allTextElements = Array.from(
-      document.querySelectorAll(
-        ".navbar_logo, .navbar_link, .navbar_dropdwn-toggle"
-      )
-    );
-    allToggles = Array.from(
-      document.querySelectorAll(".navbar_menu-dropdown .navbar_dropdwn-toggle")
-    );
-
-    injectStyles();
-    createOverlay();
-    createDropdownPortal();
-    createMeasureContainer();
-    prepareDropdowns();
-    disableWebflowBehavior();
-    bindEvents();
-    bindScrollListener();
-    bindResizeListener();
-
-    allDropdownLists = Array.from(
-      dropdownPortal.querySelectorAll(".navbar_dropdown-list")
-    );
-
+    // Defer computed-style read to after next frame so CSS has fully applied
     requestAnimationFrame(() => {
-      applyTransitions(0);
-      applyTheme();
-      requestAnimationFrame(() => applyTransitions(CONFIG.closeMs));
+      if (!navbarContainer) return; // destroyed before rAF fired
+      const style = getComputedStyle(navbarContainer);
+      originalPaddingBottom = style.paddingBottom || "0px";
+      originalMarginBottom = style.marginBottom || "0px";
+      originalNavbarHeight = navbarContainer.offsetHeight;
+
+      menuDropdowns = Array.from(
+        document.querySelectorAll(".navbar_menu-dropdown")
+      );
+      allTextElements = Array.from(
+        document.querySelectorAll(
+          ".navbar_logo, .navbar_link, .navbar_dropdwn-toggle"
+        )
+      );
+      allToggles = Array.from(
+        document.querySelectorAll(".navbar_menu-dropdown .navbar_dropdwn-toggle")
+      );
+
+      injectStyles();
+      createOverlay();
+      createDropdownPortal();
+      createMeasureContainer();
+      prepareDropdowns();
+      disableWebflowBehavior();
+      enhanceToggleA11y();
+      bindEvents();
+      bindScrollListener();
+      bindResizeListener();
+
+      allDropdownLists = Array.from(
+        dropdownPortal.querySelectorAll(".navbar_dropdown-list")
+      );
+
+      requestAnimationFrame(() => {
+        applyTransitions(0);
+        applyTheme();
+        requestAnimationFrame(() => applyTransitions(CONFIG.closeMs));
+      });
     });
+  }
+
+  function enhanceToggleA11y() {
+    for (let i = 0; i < allToggles.length; i++) {
+      const t = allToggles[i];
+      if (!t.hasAttribute("aria-haspopup")) {
+        t.setAttribute("aria-haspopup", "true");
+      }
+      if (!t.hasAttribute("aria-expanded")) {
+        t.setAttribute("aria-expanded", "false");
+      }
+      // If not a native button, make it keyboard-focusable with button semantics
+      if (t.tagName !== "BUTTON" && !t.hasAttribute("role")) {
+        t.setAttribute("role", "button");
+        if (!t.hasAttribute("tabindex")) t.setAttribute("tabindex", "0");
+      }
+    }
   }
 
   // =============================================
@@ -251,6 +311,7 @@
   }
 
   function applyTheme() {
+    if (!navbarContainer) return;
     const theme = getTheme();
     const blur = isOpen
       ? CONFIG.navbarBlur.open
@@ -290,6 +351,7 @@
   // TRANSITIONS
   // =============================================
   function applyTransitions(ms) {
+    if (!navbarContainer) return;
     const dur = `${ms}ms`;
     const ease = CONFIG.ease;
 
@@ -493,7 +555,9 @@
   function bindEvents() {
     addTrackedListener(navbarContainer, "pointerleave", (e) => {
       if (e.pointerType === "touch") return;
-      if (!navbarContainer.contains(e.relatedTarget)) {
+      // relatedTarget is null when leaving window/chrome — treat as leaving
+      const into = e.relatedTarget;
+      if (!into || !navbarContainer.contains(into)) {
         requestClose();
       }
     });
@@ -501,6 +565,12 @@
     addTrackedListener(navbarContainer, "pointerenter", (e) => {
       if (e.pointerType === "touch") return;
       if (isOpen) cancelClose();
+    });
+
+    // Cancel pending opens if the pointer input is canceled (browser takeover)
+    addTrackedListener(navbarContainer, "pointercancel", () => {
+      // If we're mid-open intent but not yet open, clear the intent
+      cancelClose();
     });
 
     for (let i = 0; i < menuDropdowns.length; i++) {
@@ -548,7 +618,10 @@
       "pointerdown",
       (e) => {
         if (!isOpen) return;
-        if (!navbarContainer.contains(e.target) && !pageOverlay.contains(e.target)) {
+        if (
+          !navbarContainer.contains(e.target) &&
+          !pageOverlay.contains(e.target)
+        ) {
           closeMenu();
         }
       },
@@ -601,6 +674,11 @@
     }
   }
 
+  // Single consolidated resize handler:
+  // - invalidates height cache
+  // - updates touch detection
+  // - repositions portal
+  // - lets top-level viewport handler decide init/destroy
   function bindResizeListener() {
     addTrackedListener(
       window,
@@ -667,14 +745,30 @@
     return height;
   }
 
+  // Thoroughly reset list styles so stale inline values from killed
+  // switch/close animations don't leak into the next open
+  function fullyResetListStyles(list) {
+    if (!list) return;
+    list.style.transition = "none";
+    list.style.opacity = "0";
+    list.style.visibility = "hidden";
+    list.style.pointerEvents = "none";
+
+    // Reset morphable children too — switchMenu sets opacity:0 on these
+    for (const selector of MORPH_SELECTORS) {
+      const el = list.querySelector(selector);
+      if (el) {
+        el.style.transition = "none";
+        el.style.opacity = "1";
+      }
+    }
+  }
+
   function resetAllLists(exceptList = null) {
     for (let i = 0; i < allDropdownLists.length; i++) {
       const list = allDropdownLists[i];
       if (list && list !== exceptList) {
-        list.style.transition = "none";
-        list.style.opacity = "0";
-        list.style.visibility = "hidden";
-        list.style.pointerEvents = "none";
+        fullyResetListStyles(list);
       }
     }
 
@@ -693,6 +787,27 @@
   // =============================================
   // OPEN / SWITCH / CLOSE
   // =============================================
+  const MORPH_SELECTORS = [
+    ".dropdown-grid-left",
+    ".dropdown-grid-right",
+    ".dropdown-grid-app",
+    ".dropdown-content-wrapper",
+  ];
+
+  // Cache morphable elements per list (low priority optimization from analysis)
+  const morphCache = new WeakMap();
+  function getMorphableElements(list) {
+    let cached = morphCache.get(list);
+    if (cached) return cached;
+    cached = {};
+    for (const selector of MORPH_SELECTORS) {
+      const el = list.querySelector(selector);
+      if (el) cached[selector] = el;
+    }
+    morphCache.set(list, cached);
+    return cached;
+  }
+
   function openOrSwitch(dropdown) {
     if (currentDropdown === dropdown) return;
     cancelPendingAnimations();
@@ -741,22 +856,6 @@
     const ease = CONFIG.ease;
     list.style.transition = `opacity ${dur} ${ease}`;
     list.style.opacity = "1";
-  }
-
-  const MORPH_SELECTORS = [
-    ".dropdown-grid-left",
-    ".dropdown-grid-right",
-    ".dropdown-grid-app",
-    ".dropdown-content-wrapper",
-  ];
-
-  function getMorphableElements(list) {
-    const elements = {};
-    for (const selector of MORPH_SELECTORS) {
-      const el = list.querySelector(selector);
-      if (el) elements[selector] = el;
-    }
-    return elements;
   }
 
   function switchMenu(nextDropdown) {
@@ -994,13 +1093,16 @@
   // =============================================
   // START — Desktop only (992px+)
   // =============================================
-  const DESKTOP_MIN = 992;
+  const DESKTOP_MIN = SHARED.DESKTOP_MIN;
 
   function handleViewport() {
     if (window.innerWidth >= DESKTOP_MIN) {
       if (!window.__navbarAnimationInitialized) init();
     } else {
-      if (window.__navbarAnimationInitialized && window.__navbarAnimationDestroy) {
+      if (
+        window.__navbarAnimationInitialized &&
+        window.__navbarAnimationDestroy
+      ) {
         window.__navbarAnimationDestroy();
       }
     }
@@ -1029,16 +1131,39 @@
 (() => {
   "use strict";
 
-  const MOBILE_MAX = 991;
-  const SCROLL_THRESHOLD = 48;
-  const EASE = "cubic-bezier(0.86, 0, 0.07, 1)";
-  const OPEN_MS = 850;
-  const CLOSE_MS = 550;
+  const SHARED = window.__watchDutyNavShared;
 
-  /* Dropdown animation config */
-  const DD_OPEN_MS = 450;
-  const DD_CLOSE_MS = 350;
+  // Idempotency guard for Webflow Editor re-execution
+  if (window.__mobileNavInitialized) {
+    window.__mobileNavDestroy?.();
+  }
+  window.__mobileNavInitialized = true;
+
+  const MOBILE_MAX = SHARED.MOBILE_MAX;
+  const SCROLL_THRESHOLD = SHARED.SCROLL_THRESHOLD;
+  const EASE = SHARED.EASE;
+  const BASE_OPEN_MS = SHARED.OPEN_MS;
+  const BASE_CLOSE_MS = SHARED.CLOSE_MS;
+
+  // Dropdown animation config
+  const BASE_DD_OPEN_MS = 450;
+  const BASE_DD_CLOSE_MS = 350;
   const DD_EASE = "cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+
+  let OPEN_MS = BASE_OPEN_MS;
+  let CLOSE_MS = BASE_CLOSE_MS;
+  let DD_OPEN_MS = BASE_DD_OPEN_MS;
+  let DD_CLOSE_MS = BASE_DD_CLOSE_MS;
+
+  const motionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+  function applyMotion() {
+    const reduce = !!motionQuery?.matches;
+    OPEN_MS = reduce ? 0 : BASE_OPEN_MS;
+    CLOSE_MS = reduce ? 0 : BASE_CLOSE_MS;
+    DD_OPEN_MS = reduce ? 0 : BASE_DD_OPEN_MS;
+    DD_CLOSE_MS = reduce ? 0 : BASE_DD_CLOSE_MS;
+    refreshStyles();
+  }
 
   const STATE = { CLOSED: 0, OPENING: 1, OPEN: 2, CLOSING: 3 };
   let state = STATE.CLOSED;
@@ -1050,7 +1175,10 @@
   const navbarMenu = document.querySelector(".navbar_menu");
   const navOverlay = document.querySelector(".w-nav-overlay");
 
-  if (!navButton || !navbarContainer) return;
+  if (!navButton || !navbarContainer) {
+    window.__mobileNavInitialized = false;
+    return;
+  }
 
   let isScrolled = false;
   let scrollTicking = false;
@@ -1061,8 +1189,22 @@
 
   const dropdownResets = [];
 
-  /* ── Helpers ─────────────────────────────────── */
+  // Track observers and listeners for cleanup
+  const observers = [];
+  const trackedListeners = [];
 
+  function addTrackedListener(el, event, handler, options) {
+    if (!el) return;
+    el.addEventListener(event, handler, options);
+    trackedListeners.push({ el, event, handler, options });
+  }
+
+  function trackObserver(observer) {
+    observers.push(observer);
+    return observer;
+  }
+
+  // Helpers
   function isMobile() {
     return window.innerWidth <= MOBILE_MAX;
   }
@@ -1099,17 +1241,17 @@
     dropdownResets.forEach((fn) => fn());
   }
 
-  /* ── Injected Stylesheet ─────────────────────── */
+  // Injected Stylesheet
+  let styleEl = null;
+  function refreshStyles() {
+    const existing = document.getElementById("mobile-nav-styles");
+    if (existing) existing.remove();
 
-  const style = document.createElement("style");
-  style.id = "mobile-nav-styles";
-  style.textContent = `
+    styleEl = document.createElement("style");
+    styleEl.id = "mobile-nav-styles";
+    styleEl.textContent = `
 @media (max-width: ${MOBILE_MAX}px) {
-
-  /* Full-viewport menu breakout */
-  .w-nav-overlay {
-    overflow: visible !important;
-  }
+  .w-nav-overlay { overflow: visible !important; }
   .navbar_menu {
     width: 100vw !important;
     max-width: none !important;
@@ -1117,7 +1259,6 @@
     box-sizing: border-box !important;
   }
 
-  /* Navbar bg transitions */
   .navbar_component {
     border: none !important;
     border-bottom: none !important;
@@ -1135,9 +1276,7 @@
   .navbar_container {
     transition: background-color ${CLOSE_MS}ms ${EASE} !important;
   }
-  .navbar_container.is-mobile-dark {
-    background-color: #000 !important;
-  }
+  .navbar_container.is-mobile-dark { background-color: #000 !important; }
   .navbar_container.is-mobile-opening {
     transition: background-color ${OPEN_MS}ms ${EASE} !important;
   }
@@ -1153,17 +1292,16 @@
     color: #ffffff !important;
   }
 
-  /* Button color sync */
-.navbar_container .button.is-mobile {
-  transition: color ${CLOSE_MS}ms ${EASE}, background-color ${CLOSE_MS}ms ${EASE}, border-color ${CLOSE_MS}ms ${EASE} !important;
-}
-.navbar_container.is-mobile-dark .button.is-mobile {
-  color: #fff !important;
-  border-color: rgba(255, 255, 255, 0.2) !important;
-}
-.navbar_container.is-mobile-opening .button.is-mobile {
-  transition: color ${OPEN_MS}ms ${EASE}, background-color ${OPEN_MS}ms ${EASE}, border-color ${OPEN_MS}ms ${EASE} !important;
-}
+  .navbar_container .button.is-mobile {
+    transition: color ${CLOSE_MS}ms ${EASE}, background-color ${CLOSE_MS}ms ${EASE}, border-color ${CLOSE_MS}ms ${EASE} !important;
+  }
+  .navbar_container.is-mobile-dark .button.is-mobile {
+    color: #fff !important;
+    border-color: rgba(255, 255, 255, 0.2) !important;
+  }
+  .navbar_container.is-mobile-opening .button.is-mobile {
+    transition: color ${OPEN_MS}ms ${EASE}, background-color ${OPEN_MS}ms ${EASE}, border-color ${OPEN_MS}ms ${EASE} !important;
+  }
   .navbar_container.is-mobile-opening .navbar_logo,
   .navbar_container.is-mobile-opening .navbar_link,
   .navbar_container.is-mobile-opening .navbar_dropdwn-toggle {
@@ -1173,9 +1311,7 @@
   .menu-icon {
     transition: background-color ${CLOSE_MS}ms ${EASE} !important;
   }
-  .navbar_container.is-mobile-dark .menu-icon {
-    background-color: #202020 !important;
-  }
+  .navbar_container.is-mobile-dark .menu-icon { background-color: #202020 !important; }
   .navbar_container.is-mobile-opening .menu-icon {
     transition: background-color ${OPEN_MS}ms ${EASE} !important;
   }
@@ -1196,22 +1332,16 @@
     transition: background-color ${OPEN_MS}ms ${EASE} !important;
   }
 
-  /* ── Dropdown slide animation base ──────────── */
-
   .navbar_menu .navbar_dropdown-list {
     display: block !important;
     max-height: 0px !important;
     overflow: hidden !important;
   }
-
-  /* Chevron base transition */
   .navbar_menu .dropdown-chevron {
     transition: transform ${DD_OPEN_MS}ms ${DD_EASE} !important;
     will-change: transform;
   }
 
-  /* Lock dropdown colors — prevent Webflow w--open from
-     triggering any color shift on open/close */
   .navbar_menu .navbar_dropdwn-toggle,
   .navbar_menu .navbar_dropdwn-toggle *,
   .navbar_menu .navbar_dropdown-list,
@@ -1220,11 +1350,15 @@
     background-color: inherit !important;
   }
 }
-  `.trim();
-  document.head.appendChild(style);
+    `.trim();
+    document.head.appendChild(styleEl);
+  }
+  refreshStyles();
 
-  /* ── Hide / Cleanup ──────────────────────────── */
+  // Live motion-preference sync
+  motionQuery?.addEventListener?.("change", applyMotion);
 
+  // Hide / Cleanup
   function forceHideMenu() {
     if (navbarMenu) {
       navbarMenu.style.setProperty("opacity", "0", "important");
@@ -1259,31 +1393,36 @@
     state = STATE.CLOSED;
     guardObservers = false;
     allowNextClick = false;
-    navbarComponent.classList.remove("is-mobile-open");
-    navbarContainer.classList.remove("is-mobile-dark", "is-mobile-opening");
+    navbarComponent?.classList.remove("is-mobile-open");
+    navbarContainer.classList.remove("is-mobile-opening");
     resetAllDropdowns();
     stripAllInlineStyles();
     body.style.overflow = "";
+
+    // Preserve scroll-based dark state even after breakpoint crossing
+    applyScrollState();
   }
 
-  /* ── Mutation Guards ─────────────────────────── */
-
+  // Mutation Guards
   if (navOverlay) {
-    new MutationObserver(() => {
-      if (guardObservers || !isMobile()) return;
-      if (state === STATE.OPEN || state === STATE.OPENING) lockOverlayAlive();
-    }).observe(navOverlay, { attributes: true, attributeFilter: ["style"] });
+    trackObserver(
+      new MutationObserver(() => {
+        if (guardObservers || !isMobile()) return;
+        if (state === STATE.OPEN || state === STATE.OPENING) lockOverlayAlive();
+      })
+    ).observe(navOverlay, { attributes: true, attributeFilter: ["style"] });
   }
 
   if (navbarMenu) {
-    new MutationObserver(() => {
-      if (guardObservers || !isMobile()) return;
-      if (state !== STATE.CLOSED) neutralizeMenuTransform();
-    }).observe(navbarMenu, { attributes: true, attributeFilter: ["style"] });
+    trackObserver(
+      new MutationObserver(() => {
+        if (guardObservers || !isMobile()) return;
+        if (state !== STATE.CLOSED) neutralizeMenuTransform();
+      })
+    ).observe(navbarMenu, { attributes: true, attributeFilter: ["style"] });
   }
 
-  /* ── Open ─────────────────────────────────────── */
-
+  // Open
   function openMobileMenu() {
     if (state !== STATE.CLOSED) return;
 
@@ -1325,8 +1464,7 @@
     }, OPEN_MS);
   }
 
-  /* ── Close ────────────────────────────────────── */
-
+  // Close
   function closeMobileMenu() {
     if (state !== STATE.OPEN) return;
 
@@ -1367,24 +1505,25 @@
       if (state !== STATE.CLOSING) return;
       state = STATE.CLOSED;
       forceHideMenu();
-      body.style.overflow = navButton.classList.contains("w--open") ? "hidden" : "";
+      body.style.overflow = navButton.classList.contains("w--open")
+        ? "hidden"
+        : "";
     }, CLOSE_MS + 50);
   }
 
-  /* ── Scroll State ─────────────────────────────── */
-
+  // Scroll State
   function applyScrollState() {
     if (!isMobile()) return;
     const menuOpen = state === STATE.OPEN || state === STATE.OPENING;
     const dark = menuOpen || isScrolled;
-    navbarComponent.classList.toggle("is-mobile-open", menuOpen);
+    navbarComponent?.classList.toggle("is-mobile-open", menuOpen);
     navbarContainer.classList.toggle("is-mobile-dark", dark);
     navbarContainer.classList.toggle("is-mobile-opening", menuOpen);
   }
 
-  /* ── Event Listeners ─────────────────────────── */
-
-  navButton.addEventListener(
+  // Event Listeners (tracked for cleanup)
+  addTrackedListener(
+    navButton,
     "pointerdown",
     (e) => {
       if (!isMobile()) return;
@@ -1407,7 +1546,8 @@
     { capture: true }
   );
 
-  navButton.addEventListener(
+  addTrackedListener(
+    navButton,
     "click",
     (e) => {
       if (!isMobile()) return;
@@ -1418,13 +1558,27 @@
       }
 
       e.preventDefault();
+      // Intentionally stopImmediatePropagation — we own this button's click
+      // behavior and block Webflow's default toggle from re-triggering.
       e.stopImmediatePropagation();
     },
     { capture: true }
   );
 
+  // Pointercancel safety — if the browser takes over the gesture (scroll,
+  // system UI), reset any optimistic state we set in pointerdown.
+  addTrackedListener(
+    navButton,
+    "pointercancel",
+    () => {
+      allowNextClick = false;
+    },
+    { capture: true }
+  );
+
   if (navbarMenu) {
-    navbarMenu.addEventListener(
+    addTrackedListener(
+      navbarMenu,
       "click",
       (e) => {
         if (!isMobile()) return;
@@ -1436,7 +1590,8 @@
   }
 
   if (navOverlay) {
-    navOverlay.addEventListener(
+    addTrackedListener(
+      navOverlay,
       "pointerdown",
       (e) => {
         if (!isMobile()) return;
@@ -1447,29 +1602,31 @@
     );
   }
 
-  /* ── Webflow State Sync ──────────────────────── */
+  // Webflow State Sync
+  trackObserver(
+    new MutationObserver(() => {
+      if (isLocked()) return;
 
-  new MutationObserver(() => {
-    if (isLocked()) return;
+      const nowOpen = navButton.classList.contains("w--open");
+      body.style.overflow =
+        nowOpen || state === STATE.CLOSING ? "hidden" : "";
 
-    const nowOpen = navButton.classList.contains("w--open");
-    body.style.overflow = nowOpen || state === STATE.CLOSING ? "hidden" : "";
+      if (nowOpen && state === STATE.CLOSED) {
+        openMobileMenu();
+      } else if (!nowOpen && state === STATE.OPEN) {
+        closeMobileMenu();
+      }
 
-    if (nowOpen && state === STATE.CLOSED) {
-      openMobileMenu();
-    } else if (!nowOpen && state === STATE.OPEN) {
-      closeMobileMenu();
-    }
+      requestAnimationFrame(() => {
+        neutralizeMenuTransform();
+        requestAnimationFrame(neutralizeMenuTransform);
+      });
+    })
+  ).observe(navButton, { attributes: true, attributeFilter: ["class"] });
 
-    requestAnimationFrame(() => {
-      neutralizeMenuTransform();
-      requestAnimationFrame(neutralizeMenuTransform);
-    });
-  }).observe(navButton, { attributes: true, attributeFilter: ["class"] });
-
-  /* ── Scroll ──────────────────────────────────── */
-
-  window.addEventListener(
+  // Scroll
+  addTrackedListener(
+    window,
     "scroll",
     () => {
       if (scrollTicking) return;
@@ -1484,18 +1641,17 @@
     { passive: true }
   );
 
-  /* ── Resize ──────────────────────────────────── */
-
-  window.addEventListener("resize", () => {
+  // Resize
+  addTrackedListener(window, "resize", () => {
     if (!isMobile()) {
       clearMobileStyles();
     } else {
       neutralizeMenuTransform();
+      applyScrollState();
     }
   });
 
-  /* ── Dropdown Slide Animations ───────────────── */
-
+  // Dropdown Slide Animations
   if (navbarMenu) {
     const allDropdowns = navbarMenu.querySelectorAll(".navbar_menu-dropdown");
 
@@ -1521,91 +1677,167 @@
 
       dropdownResets.push(resetDropdown);
 
-      new MutationObserver(() => {
-        if (!isMobile()) return;
-        if (state === STATE.CLOSED || state === STATE.CLOSING) return;
+      trackObserver(
+        new MutationObserver(() => {
+          if (!isMobile()) return;
+          if (state === STATE.CLOSED || state === STATE.CLOSING) return;
 
-        const nowOpen = list.classList.contains("w--open");
-        if (nowOpen === ddOpen) return;
-        ddOpen = nowOpen;
-        clearTimeout(ddTimeout);
+          const nowOpen = list.classList.contains("w--open");
+          if (nowOpen === ddOpen) return;
+          ddOpen = nowOpen;
+          clearTimeout(ddTimeout);
 
-        if (ddOpen) {
-          list.style.setProperty("transition", "none", "important");
-          list.style.setProperty("max-height", "0px", "important");
-          list.style.setProperty("overflow", "hidden", "important");
-          void list.offsetHeight;
+          if (ddOpen) {
+            list.style.setProperty("transition", "none", "important");
+            list.style.setProperty("max-height", "0px", "important");
+            list.style.setProperty("overflow", "hidden", "important");
+            void list.offsetHeight;
 
-          const h = list.scrollHeight;
+            const h = list.scrollHeight;
 
-          list.style.setProperty(
-            "transition",
-            `max-height ${DD_OPEN_MS}ms ${DD_EASE}`,
-            "important"
-          );
-          list.style.setProperty("max-height", h + "px", "important");
-
-          if (chevron) {
-            chevron.style.setProperty(
+            list.style.setProperty(
               "transition",
-              `transform ${DD_OPEN_MS}ms ${DD_EASE}`,
+              `max-height ${DD_OPEN_MS}ms ${DD_EASE}`,
               "important"
             );
-            chevron.style.setProperty("transform", "rotate(180deg)", "important");
-          }
+            list.style.setProperty("max-height", h + "px", "important");
 
-          ddTimeout = setTimeout(() => {
-            list.style.setProperty("max-height", "none", "important");
-            list.style.removeProperty("overflow");
-          }, DD_OPEN_MS + 20);
+            if (chevron) {
+              chevron.style.setProperty(
+                "transition",
+                `transform ${DD_OPEN_MS}ms ${DD_EASE}`,
+                "important"
+              );
+              chevron.style.setProperty(
+                "transform",
+                "rotate(180deg)",
+                "important"
+              );
+            }
 
-        } else {
-          const h = list.scrollHeight;
-          list.style.setProperty("transition", "none", "important");
-          list.style.setProperty("max-height", h + "px", "important");
-          list.style.setProperty("overflow", "hidden", "important");
-          void list.offsetHeight;
+            ddTimeout = setTimeout(() => {
+              list.style.setProperty("max-height", "none", "important");
+              list.style.removeProperty("overflow");
+            }, DD_OPEN_MS + 20);
+          } else {
+            const h = list.scrollHeight;
+            list.style.setProperty("transition", "none", "important");
+            list.style.setProperty("max-height", h + "px", "important");
+            list.style.setProperty("overflow", "hidden", "important");
+            void list.offsetHeight;
 
-          list.style.setProperty(
-            "transition",
-            `max-height ${DD_CLOSE_MS}ms ${DD_EASE}`,
-            "important"
-          );
-          list.style.setProperty("max-height", "0px", "important");
-
-          if (chevron) {
-            chevron.style.setProperty(
+            list.style.setProperty(
               "transition",
-              `transform ${DD_CLOSE_MS}ms ${DD_EASE}`,
+              `max-height ${DD_CLOSE_MS}ms ${DD_EASE}`,
               "important"
             );
-            chevron.style.setProperty("transform", "rotate(0deg)", "important");
+            list.style.setProperty("max-height", "0px", "important");
+
+            if (chevron) {
+              chevron.style.setProperty(
+                "transition",
+                `transform ${DD_CLOSE_MS}ms ${DD_EASE}`,
+                "important"
+              );
+              chevron.style.setProperty(
+                "transform",
+                "rotate(0deg)",
+                "important"
+              );
+            }
           }
-        }
-      }).observe(list, { attributes: true, attributeFilter: ["class"] });
+        })
+      ).observe(list, { attributes: true, attributeFilter: ["class"] });
     });
   }
 
-  /* ── Init ─────────────────────────────────────── */
-
+  // Init
   isScrolled = window.scrollY > SCROLL_THRESHOLD;
   applyScrollState();
   neutralizeMenuTransform();
+
+  // Destroy (for Webflow Editor re-execution / SPA navigation)
+  window.__mobileNavDestroy = function destroy() {
+    clearAllTimers();
+
+    for (const obs of observers) obs.disconnect();
+    observers.length = 0;
+
+    for (const { el, event, handler, options } of trackedListeners) {
+      el.removeEventListener(event, handler, options);
+    }
+    trackedListeners.length = 0;
+
+    motionQuery?.removeEventListener?.("change", applyMotion);
+
+    resetAllDropdowns();
+    stripAllInlineStyles();
+
+    styleEl?.parentNode?.removeChild(styleEl);
+    styleEl = null;
+
+    navbarComponent?.classList.remove("is-mobile-open");
+    navbarContainer.classList.remove("is-mobile-dark", "is-mobile-opening");
+    body.style.overflow = "";
+
+    window.__mobileNavInitialized = false;
+  };
 })();
 
+
+/* ═══════════════════════════════════════════════
+   MOBILE CTA — Platform-aware href
+   ═══════════════════════════════════════════════ */
+
 (() => {
-  const btn = document.querySelector(".navbar_container .button.is-mobile");
-  if (!btn) return;
+  "use strict";
+
+  const IOS_URL = "https://apps.apple.com/us/app/watch-duty-wildfire/id1574452924";
+  const ANDROID_URL = "https://play.google.com/store/apps/details?id=org.watchduty.app";
+  const WEB_URL = "https://app.watchduty.org/";
 
   const ua = navigator.userAgent || "";
   const isIOS = /iPhone|iPad|iPod/i.test(ua);
   const isAndroid = /Android/i.test(ua);
+  const platformUrl = isIOS ? IOS_URL : isAndroid ? ANDROID_URL : WEB_URL;
 
-  if (isIOS) {
-    btn.href = "https://apps.apple.com/us/app/watch-duty-wildfire/id1574452924";
-  } else if (isAndroid) {
-    btn.href = "https://play.google.com/store/apps/details?id=org.watchduty.app";
-  } else {
-    btn.href = "https://app.watchduty.org/";
+  function applyHref(btn) {
+    if (!btn) return;
+    if (btn.dataset.platformHref === platformUrl) return;
+    btn.href = platformUrl;
+    btn.dataset.platformHref = platformUrl;
   }
+
+  function findAndApply() {
+    const btn = document.querySelector(".navbar_container .button.is-mobile");
+    applyHref(btn);
+  }
+
+  // Initial pass
+  findAndApply();
+
+  // Re-apply when Webflow re-renders (Editor, CMS, dynamic content)
+  if (window.__ctaHrefObserver) {
+    window.__ctaHrefObserver.disconnect();
+  }
+
+  window.__ctaHrefObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      for (const node of m.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (
+          node.matches?.(".navbar_container .button.is-mobile") ||
+          node.querySelector?.(".navbar_container .button.is-mobile")
+        ) {
+          findAndApply();
+          return;
+        }
+      }
+    }
+  });
+
+  window.__ctaHrefObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
 })();
