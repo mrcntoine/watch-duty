@@ -1205,12 +1205,15 @@
     margin-left: calc(-50vw + 50%) !important;
     box-sizing: border-box !important;
     transform: translate3d(0, 0, 0) !important;
+    -webkit-transform: translate3d(0, 0, 0) !important;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
 
     /* Menu fade — GPU compositing */
     opacity: 0;
     pointer-events: none;
     transition: opacity ${CLOSE_MS}ms ${EASE};
-    will-change: opacity;
+    will-change: opacity, transform;
   }
 
   /* ── OPEN state — menu visible ── */
@@ -1228,10 +1231,14 @@
     outline: none !important;
     background-color: transparent;
     transition: background-color ${CLOSE_MS}ms ${EASE};
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    will-change: background-color;
   }
   .navbar_container {
     background-color: transparent;
     transition: background-color ${CLOSE_MS}ms ${EASE};
+    will-change: background-color;
   }
 
   /* ── Opening: switch transition duration ── */
@@ -1414,45 +1421,84 @@
   }
 
   // ── EVENT BINDING ──
-  // Use pointerdown with pointer-type filter.
-  // Key insight: on iOS Chrome, pointer events have latency, but click
-  // events following pointerdown do not. So: fire on pointerdown for
-  // touch (immediate), fall through to click for mouse.
+  // On iOS, event order is: touchstart → pointerdown → mousedown → click.
+  // touchstart fires ~20-50ms FASTER than pointerdown on iOS, so we use it
+  // as the primary trigger for touch, then dedupe the subsequent events.
   let lastTouchToggleAt = 0;
+  const TOUCH_DEDUPE_MS = 600;
 
+  // Prevent Webflow's own click handler from running at all on mobile.
+  // We intercept at the earliest possible moment (touchstart) and block
+  // every downstream event it would cascade into.
+  addL(
+    navButton,
+    "touchstart",
+    (e) => {
+      if (!isMobile()) return;
+      if (e.touches && e.touches.length !== 1) return; // ignore multi-touch
+
+      lastTouchToggleAt = Date.now();
+
+      // Fire toggle synchronously — no setTimeout, no rAF, nothing.
+      // The class flip happens in the same tick as the touch.
+      toggleMenu();
+
+      // Stop every downstream event Webflow might act on
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    { capture: true, passive: false }
+  );
+
+  // pointerdown fallback for stylus/pen (Apple Pencil on iPad)
   addL(
     navButton,
     "pointerdown",
     (e) => {
       if (!isMobile()) return;
-      if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
+      if (e.pointerType !== "pen") return; // touch already handled above
       if (e.button !== undefined && e.button !== 0) return;
 
-      // Fire immediately on touch-down
       lastTouchToggleAt = Date.now();
       toggleMenu();
       e.preventDefault();
+      e.stopPropagation();
     },
     { capture: true, passive: false }
   );
 
+  // Swallow the synthetic click that follows touchstart on iOS
   addL(
     navButton,
     "click",
     (e) => {
       if (!isMobile()) return;
 
-      // Dedupe: if pointerdown just handled this, swallow the click
-      if (Date.now() - lastTouchToggleAt < 500) {
+      // If we just handled a touch, swallow the click entirely
+      if (Date.now() - lastTouchToggleAt < TOUCH_DEDUPE_MS) {
         e.preventDefault();
         e.stopImmediatePropagation();
         return;
       }
 
-      // Mouse click path
+      // Pure mouse click (no prior touch) — handle it here
       e.preventDefault();
       e.stopImmediatePropagation();
       toggleMenu();
+    },
+    { capture: true }
+  );
+
+  // Also swallow mousedown that comes from touch (Safari synthesizes it)
+  addL(
+    navButton,
+    "mousedown",
+    (e) => {
+      if (!isMobile()) return;
+      if (Date.now() - lastTouchToggleAt < TOUCH_DEDUPE_MS) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
     },
     { capture: true }
   );
@@ -1523,10 +1569,15 @@
   });
 
   // ── WEBFLOW SYNC ──
-  // Webflow toggles w--open on the nav button. Mirror it, but don't fight it.
-  // We also STRIP Webflow's own menu animation by overriding transform in CSS.
+  // Fallback only: if something else toggles w--open (keyboard, assistive tech,
+  // Webflow reaching through our guards), mirror state. But don't react if we
+  // JUST toggled — avoids feedback loop where our own handler triggers w--open
+  // which triggers this observer which re-triggers our handler.
   trackObserver(
     new MutationObserver(() => {
+      // Ignore mutations that happen within our own toggle window
+      if (Date.now() - lastTouchToggleAt < TOUCH_DEDUPE_MS) return;
+
       const wfOpen = navButton.classList.contains("w--open");
       if (wfOpen && state === STATE.CLOSED) {
         openMenu();
@@ -1597,6 +1648,54 @@
   // ── INIT ──
   isScrolled = window.scrollY > SCROLL_THRESHOLD;
   applyState();
+
+  // ── FIRST-TAP WARMUP ──
+  // iOS WebKit lazily creates GPU compositing layers and JIT-compiles JS on
+  // first execution. This causes a noticeable stutter on the first real tap.
+  // We pre-warm both by forcing a no-op state change cycle that promotes
+  // the compositor layers and exercises the hot code path.
+  function primeForFirstTap() {
+    if (!isMobile()) return;
+
+    // 1. Force layer promotion by triggering a transform on the menu.
+    //    translateZ(0) forces the element onto its own GPU layer.
+    if (navbarMenu) {
+      navbarMenu.style.transform = "translate3d(0, 0, 0)";
+      // Force a paint so the layer is actually created
+      void navbarMenu.offsetHeight;
+    }
+    if (navbarComponent) {
+      navbarComponent.style.transform = "translate3d(0, 0, 0)";
+      void navbarComponent.offsetHeight;
+    }
+
+    // 2. JIT warmup: run the toggle logic against a throwaway mock target
+    //    so V8/JSC sees the code path before the user triggers it.
+    //    We don't actually flip state — just exercise the classList ops
+    //    and getComputedStyle reads that happen on real toggle.
+    try {
+      const _ = navButton.classList.contains("w--open");
+      const __ = navbarComponent?.classList.contains("is-m-open");
+      const ___ = window.scrollY;
+      void _; void __; void ___;
+    } catch (e) { /* noop */ }
+
+    // 3. Force a synchronous style recalc so the CSS transitions
+    //    in the injected stylesheet are parsed and applied.
+    if (navbarMenu) {
+      getComputedStyle(navbarMenu).opacity;
+      getComputedStyle(navbarMenu).transition;
+    }
+  }
+
+  // Run warmup after first paint so it doesn't block initial render
+  if (document.readyState === "complete") {
+    requestAnimationFrame(primeForFirstTap);
+  } else {
+    window.addEventListener("load", () => {
+      requestAnimationFrame(primeForFirstTap);
+    }, { once: true });
+  }
 
   // ── DESTROY ──
   window.__mobileNavDestroy = function destroy() {
