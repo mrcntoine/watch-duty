@@ -1,91 +1,106 @@
 /* ═══════════════════════════════════════════════
    WATCH DUTY NAVBAR
-   Desktop portal dropdowns + mobile full-viewport menu
+   Exclusive-mode architecture. Mobile and desktop
+   CANNOT run simultaneously. Mode arbitration is
+   driven by matchMedia("(max-width: 991px)"), the
+   same breakpoint as Webflow's data-collapse="medium".
    ═══════════════════════════════════════════════ */
 
 /* ───────────────────────────────────────────────
-   SHARED CONSTANTS
+   SHARED: viewport detection + mode arbitration
    ─────────────────────────────────────────────── */
 (() => {
   "use strict";
-  if (window.__watchDutyNavShared) return;
-  window.__watchDutyNavShared = {
-    DESKTOP_MIN: 992,
-    MOBILE_MAX: 991,
-    SCROLL_THRESHOLD: 48,
-    EASE: "cubic-bezier(0.86, 0, 0.07, 1)",
-    OPEN_MS: 850,
-    CLOSE_MS: 550,
-  };
-})();
-
-/* ═══════════════════════════════════════════════
-   DESKTOP NAV — ≥992px
-   ═══════════════════════════════════════════════ */
-
-(function () {
-  "use strict";
-
-  const SHARED = window.__watchDutyNavShared;
-
-  // Prevent double initialization in Webflow
-  if (window.__navbarAnimationInitialized) {
-    if (window.__navbarAnimationDestroy) window.__navbarAnimationDestroy();
+  if (window.__wdNavShared) {
+    window.__wdNavShared.destroyAll?.();
   }
 
-  // =============================================
-  // CONFIGURATION
-  // =============================================
-  const CONFIG = {
-    scrollThreshold: SHARED.SCROLL_THRESHOLD,
-    maxWidth: "84rem",
+  const mobileQuery = window.matchMedia("(max-width: 991px)");
 
-    borderRadius: "var(--_ui-styles---radius--xlarge)",
-    borderRadiusPx: 20,
+  const shared = {
+    mobileQuery,
+    isMobile: () => mobileQuery.matches,
+    isDesktop: () => !mobileQuery.matches,
+    desktopInit: null,
+    desktopDestroy: null,
+    mobileInit: null,
+    mobileDestroy: null,
+    activeMode: null,
 
-    ease: SHARED.EASE,
-    openMs: SHARED.OPEN_MS,
-    closeMs: SHARED.CLOSE_MS,
-    switchMs: 450,
+    activate() {
+      const target = this.isMobile() ? "mobile" : "desktop";
+      if (this.activeMode === target) return;
 
-    overlayOpacity: 0.72,
-    overlayBlurPx: 14,
+      if (this.activeMode === "desktop") this.desktopDestroy?.();
+      if (this.activeMode === "mobile") this.mobileDestroy?.();
+      this.activeMode = null;
 
-    navbarBlur: {
-      top: "0px",
-      scrolled: "12px",
-      open: "16px",
+      if (target === "mobile" && this.mobileInit) {
+        this.mobileInit();
+        this.activeMode = "mobile";
+      } else if (target === "desktop" && this.desktopInit) {
+        this.desktopInit();
+        this.activeMode = "desktop";
+      }
     },
 
-    closeDelayMs: 120,
+    destroyAll() {
+      if (this.activeMode === "desktop") this.desktopDestroy?.();
+      if (this.activeMode === "mobile") this.mobileDestroy?.();
+      this.activeMode = null;
+    },
+  };
 
+  mobileQuery.addEventListener?.("change", () => shared.activate());
+
+  window.__wdNavShared = shared;
+
+  // Activate after mode IIFEs have registered
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => shared.activate(), { once: true });
+  } else {
+    queueMicrotask(() => shared.activate());
+  }
+})();
+
+
+/* ═══════════════════════════════════════════════
+   DESKTOP NAV (≥992px)
+   ═══════════════════════════════════════════════ */
+(() => {
+  "use strict";
+  const SHARED = window.__wdNavShared;
+
+  const CONFIG = {
+    scrollThreshold: 48,
+    maxWidth: "84rem",
+    ease: "cubic-bezier(0.86, 0, 0.07, 1)",
+    openMs: 850,
+    closeMs: 550,
+    switchMs: 450,
+    overlayOpacity: 0.72,
+    overlayBlurPx: 14,
+    navbarBlur: { top: "0px", scrolled: "12px", open: "16px" },
+    closeDelayMs: 120,
     appToggleBg: "var(--_primitives---colors--accent-primary)",
     appToggleText: "#1a1a1a",
-
     toggleRadiusPx: 12,
-
-    touchBreakpoint: SHARED.MOBILE_MAX,
-
     closeFallbackBuffer: 150,
-
     colors: {
       top: {
         navbarBg: "rgba(255, 255, 255, 0.95)",
         textColor: "#1a1a1a",
-        dropdownText: "#1a1a1a",
         elementBg: "rgba(0, 0, 0, 0.05)",
       },
       scrolled: {
         navbarBg: "rgba(0, 0, 0, 0.92)",
         textColor: "#ffffff",
-        dropdownText: "#ffffff",
         elementBg: "rgba(255, 255, 255, 0.1)",
       },
     },
   };
 
-  // Store baseline values so prefers-reduced-motion can toggle live
-  const BASE_TIMINGS = {
+  const BASE = {
     openMs: CONFIG.openMs,
     closeMs: CONFIG.closeMs,
     switchMs: CONFIG.switchMs,
@@ -94,36 +109,21 @@
   };
 
   const motionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-
-  function applyMotionPreference() {
+  function applyMotion() {
     if (motionQuery?.matches) {
-      CONFIG.openMs = 0;
-      CONFIG.closeMs = 0;
-      CONFIG.switchMs = 0;
+      CONFIG.openMs = CONFIG.closeMs = CONFIG.switchMs = 0;
       CONFIG.overlayBlurPx = 0;
       CONFIG.navbarBlur = { top: "0px", scrolled: "0px", open: "0px" };
     } else {
-      CONFIG.openMs = BASE_TIMINGS.openMs;
-      CONFIG.closeMs = BASE_TIMINGS.closeMs;
-      CONFIG.switchMs = BASE_TIMINGS.switchMs;
-      CONFIG.overlayBlurPx = BASE_TIMINGS.overlayBlurPx;
-      CONFIG.navbarBlur = { ...BASE_TIMINGS.navbarBlur };
+      CONFIG.openMs = BASE.openMs;
+      CONFIG.closeMs = BASE.closeMs;
+      CONFIG.switchMs = BASE.switchMs;
+      CONFIG.overlayBlurPx = BASE.overlayBlurPx;
+      CONFIG.navbarBlur = { ...BASE.navbarBlur };
     }
   }
-  applyMotionPreference();
+  applyMotion();
 
-  // Re-apply on live OS-level toggle
-  motionQuery?.addEventListener?.("change", () => {
-    applyMotionPreference();
-    if (window.__navbarAnimationInitialized) {
-      // Refresh injected styles so overlay blur / radii pick up new values
-      injectStyles?.();
-    }
-  });
-
-  // =============================================
-  // STATE
-  // =============================================
   let navbarContainer, dropdownPortal, pageOverlay, measureContainer;
   let menuDropdowns = [];
   let allTextElements = [];
@@ -134,64 +134,58 @@
   let currentDropdown = null;
   let currentList = null;
   let closeTimer = null;
-
+  let switchTimeout = null;
+  let closeFallbackTimeout = null;
   let smoothScrollInstance = null;
   let smoothScrollUnsub = null;
-
   let originalPaddingBottom = null;
   let originalMarginBottom = null;
   let originalNavbarHeight = null;
-
-  let boundEventListeners = [];
+  let boundListeners = [];
   let styleElement = null;
-
   let dropdownListMap = new Map();
-
+  let dropdownHeightCache = new WeakMap();
+  let morphCache = new WeakMap();
   let lastScrollY = 0;
   let scrollTicking = false;
 
-  let dropdownHeightCache = new WeakMap();
-  let resizeTimeout = null;
+  const MORPH_SELECTORS = [
+    ".dropdown-grid-left",
+    ".dropdown-grid-right",
+    ".dropdown-grid-app",
+    ".dropdown-content-wrapper",
+  ];
 
-  let switchTimeout = null;
-  let closeFallbackTimeout = null;
-
-  let isTouchDevice = false;
-
-  // =============================================
-  // HELPERS
-  // =============================================
-  function getListForDropdown(dropdown) {
-    return dropdownListMap.get(dropdown);
-  }
-
-  function addTrackedListener(el, event, handler, options) {
+  function addL(el, event, handler, options) {
     if (!el) return;
     el.addEventListener(event, handler, options);
-    boundEventListeners.push({ el, event, handler, options });
+    boundListeners.push({ el, event, handler, options });
   }
 
-  function detectTouch() {
-    return (
-      "ontouchstart" in window ||
-      navigator.maxTouchPoints > 0 ||
-      window.innerWidth <= CONFIG.touchBreakpoint
-    );
+  function getListFor(dd) { return dropdownListMap.get(dd); }
+
+  function getMorphable(list) {
+    let cached = morphCache.get(list);
+    if (cached) return cached;
+    cached = {};
+    for (const sel of MORPH_SELECTORS) {
+      const el = list.querySelector(sel);
+      if (el) cached[sel] = el;
+    }
+    morphCache.set(list, cached);
+    return cached;
   }
 
-  function setExpandedSpace(px, msForTransition) {
+  function setExpandedSpace(px, ms) {
     if (!navbarContainer) return;
-    const dur =
-      typeof msForTransition === "number" ? msForTransition : CONFIG.closeMs;
+    const dur = typeof ms === "number" ? ms : CONFIG.closeMs;
     const ease = CONFIG.ease;
-
     navbarContainer.style.transition =
       `background-color ${dur}ms ${ease}, ` +
       `backdrop-filter ${dur}ms ${ease}, ` +
       `-webkit-backdrop-filter ${dur}ms ${ease}, ` +
       `padding-bottom ${dur}ms ${ease}, ` +
       `margin-bottom ${dur}ms ${ease}`;
-
     if (px > 0) {
       navbarContainer.style.paddingBottom = `calc(${originalPaddingBottom} + ${px}px)`;
       navbarContainer.style.marginBottom = `calc(${originalMarginBottom} - ${px}px)`;
@@ -201,111 +195,22 @@
     }
   }
 
-  // =============================================
-  // INIT
-  // =============================================
-  function init() {
-    navbarContainer = document.querySelector(".navbar_container");
-    if (!navbarContainer) return;
-
-    window.__navbarAnimationInitialized = true;
-
-    isTouchDevice = detectTouch();
-
-    // Defer computed-style read to after next frame so CSS has fully applied
-    requestAnimationFrame(() => {
-      if (!navbarContainer) return; // destroyed before rAF fired
-      const style = getComputedStyle(navbarContainer);
-      originalPaddingBottom = style.paddingBottom || "0px";
-      originalMarginBottom = style.marginBottom || "0px";
-      originalNavbarHeight = navbarContainer.offsetHeight;
-
-      menuDropdowns = Array.from(
-        document.querySelectorAll(".navbar_menu-dropdown")
-      );
-      allTextElements = Array.from(
-        document.querySelectorAll(
-          ".navbar_logo, .navbar_link, .navbar_dropdwn-toggle"
-        )
-      );
-      allToggles = Array.from(
-        document.querySelectorAll(".navbar_menu-dropdown .navbar_dropdwn-toggle")
-      );
-
-      injectStyles();
-      createOverlay();
-      createDropdownPortal();
-      createMeasureContainer();
-      prepareDropdowns();
-      disableWebflowBehavior();
-      enhanceToggleA11y();
-      bindEvents();
-      bindScrollListener();
-      bindResizeListener();
-
-      allDropdownLists = Array.from(
-        dropdownPortal.querySelectorAll(".navbar_dropdown-list")
-      );
-
-      requestAnimationFrame(() => {
-        applyTransitions(0);
-        applyTheme();
-        requestAnimationFrame(() => applyTransitions(CONFIG.closeMs));
-      });
-    });
-  }
-
-  function enhanceToggleA11y() {
-    for (let i = 0; i < allToggles.length; i++) {
-      const t = allToggles[i];
-      if (!t.hasAttribute("aria-haspopup")) {
-        t.setAttribute("aria-haspopup", "true");
-      }
-      if (!t.hasAttribute("aria-expanded")) {
-        t.setAttribute("aria-expanded", "false");
-      }
-      // If not a native button, make it keyboard-focusable with button semantics
-      if (t.tagName !== "BUTTON" && !t.hasAttribute("role")) {
-        t.setAttribute("role", "button");
-        if (!t.hasAttribute("tabindex")) t.setAttribute("tabindex", "0");
-      }
-    }
-  }
-
-  // =============================================
-  // SMOOTH SCROLL HELPERS
-  // =============================================
-  function getLenisLikeInstance() {
-    if (window.lenis && typeof window.lenis.on === "function")
-      return window.lenis;
-
-    const loco =
-      window.locomotiveScroll ||
-      window.LocomotiveScrollInstance ||
-      window.locoScroll;
+  function getLenisLike() {
+    if (window.lenis?.on) return window.lenis;
+    const loco = window.locomotiveScroll || window.LocomotiveScrollInstance || window.locoScroll;
     if (loco) {
-      if (loco.lenis && typeof loco.lenis.on === "function") return loco.lenis;
-      if (loco._lenis && typeof loco._lenis.on === "function")
-        return loco._lenis;
-      if (loco.scroll && typeof loco.scroll.on === "function")
-        return loco.scroll;
+      if (loco.lenis?.on) return loco.lenis;
+      if (loco._lenis?.on) return loco._lenis;
+      if (loco.scroll?.on) return loco.scroll;
     }
     return null;
   }
 
   function getScrollTop() {
-    const l = smoothScrollInstance || getLenisLikeInstance();
-    return (
-      (l && typeof l.scroll === "number" ? l.scroll : null) ??
-      window.scrollY ??
-      window.pageYOffset ??
-      0
-    );
+    const l = smoothScrollInstance || getLenisLike();
+    return (l?.scroll ?? window.scrollY ?? window.pageYOffset ?? 0);
   }
 
-  // =============================================
-  // THEME
-  // =============================================
   function getTheme() {
     return isOpen || isScrolled ? CONFIG.colors.scrolled : CONFIG.colors.top;
   }
@@ -313,81 +218,48 @@
   function applyTheme() {
     if (!navbarContainer) return;
     const theme = getTheme();
-    const blur = isOpen
-      ? CONFIG.navbarBlur.open
-      : isScrolled
-        ? CONFIG.navbarBlur.scrolled
-        : CONFIG.navbarBlur.top;
-
+    const blur = isOpen ? CONFIG.navbarBlur.open : isScrolled ? CONFIG.navbarBlur.scrolled : CONFIG.navbarBlur.top;
     const cs = navbarContainer.style;
     cs.maxWidth = CONFIG.maxWidth;
     cs.backgroundColor = theme.navbarBg;
     cs.backdropFilter = `blur(${blur})`;
     cs.webkitBackdropFilter = `blur(${blur})`;
 
-    const textColor = theme.textColor;
-    for (let i = 0; i < allTextElements.length; i++) {
-      allTextElements[i].style.color = textColor;
-    }
+    for (const el of allTextElements) el.style.color = theme.textColor;
 
-    const elementBg = theme.elementBg;
-    for (let i = 0; i < menuDropdowns.length; i++) {
-      const dd = menuDropdowns[i];
-      const toggle = dd.querySelector(".navbar_dropdwn-toggle");
-      if (!toggle) continue;
-
-      if (toggle.classList.contains("is-app")) {
-        toggle.style.backgroundColor = CONFIG.appToggleBg;
-        toggle.style.color = CONFIG.appToggleText;
+    for (const dd of menuDropdowns) {
+      const t = dd.querySelector(".navbar_dropdwn-toggle");
+      if (!t) continue;
+      if (t.classList.contains("is-app")) {
+        t.style.backgroundColor = CONFIG.appToggleBg;
+        t.style.color = CONFIG.appToggleText;
         continue;
       }
-
-      toggle.style.backgroundColor =
-        isOpen && dd === currentDropdown ? elementBg : "transparent";
+      t.style.backgroundColor = isOpen && dd === currentDropdown ? theme.elementBg : "transparent";
     }
   }
 
-  // =============================================
-  // TRANSITIONS
-  // =============================================
   function applyTransitions(ms) {
     if (!navbarContainer) return;
     const dur = `${ms}ms`;
     const ease = CONFIG.ease;
-
-    const transition =
+    navbarContainer.style.transition =
       `background-color ${dur} ${ease}, ` +
       `backdrop-filter ${dur} ${ease}, ` +
       `-webkit-backdrop-filter ${dur} ${ease}, ` +
       `padding-bottom ${dur} ${ease}, ` +
       `margin-bottom ${dur} ${ease}`;
-
-    const colorTransition = `color ${dur} ${ease}`;
-    const toggleTransition = `color ${dur} ${ease}, background-color ${dur} ${ease}`;
-    const overlayTransition =
-      `opacity ${dur} ${ease}, ` +
-      `backdrop-filter ${dur} ${ease}, ` +
-      `-webkit-backdrop-filter ${dur} ${ease}`;
-
-    navbarContainer.style.transition = transition;
-
-    for (let i = 0; i < allTextElements.length; i++) {
-      allTextElements[i].style.transition = colorTransition;
+    for (const el of allTextElements) el.style.transition = `color ${dur} ${ease}`;
+    for (const t of allToggles) t.style.transition = `color ${dur} ${ease}, background-color ${dur} ${ease}`;
+    if (pageOverlay) {
+      pageOverlay.style.transition =
+        `opacity ${dur} ${ease}, backdrop-filter ${dur} ${ease}, -webkit-backdrop-filter ${dur} ${ease}`;
     }
-
-    for (let i = 0; i < allToggles.length; i++) {
-      allToggles[i].style.transition = toggleTransition;
-    }
-
-    if (pageOverlay) pageOverlay.style.transition = overlayTransition;
   }
 
-  // =============================================
-  // STYLES
-  // =============================================
   function injectStyles() {
-    const existingStyle = document.getElementById("navbar-animation-styles");
-    if (existingStyle) existingStyle.remove();
+    const existing = document.getElementById("wd-navbar-desktop-styles");
+    if (existing) existing.remove();
 
     const css = `
 .navbar_container{
@@ -397,105 +269,59 @@
   max-width: ${CONFIG.maxWidth} !important;
   will-change: background-color, backdrop-filter, padding-bottom, margin-bottom;
 }
-
-.navbar_logo-link,
-.navbar_menu,
-.navbar_button-wrapper{
-  position: relative;
-  z-index: 10;
-}
-
+.navbar_logo-link, .navbar_menu, .navbar_button-wrapper{ position: relative; z-index: 10; }
 .navbar-dropdown-portal{
-  position: absolute;
-  left: 0;
-  right: 0;
-  z-index: 1;
-  pointer-events: none;
-  overflow: hidden;
+  position: absolute; left: 0; right: 0; z-index: 1;
+  pointer-events: none; overflow: hidden;
 }
-.navbar-dropdown-portal.is-open{
-  pointer-events: auto;
-}
-
+.navbar-dropdown-portal.is-open{ pointer-events: auto; }
 .navbar-measure-container{
-  position: absolute !important;
-  left: -9999px !important;
-  top: -9999px !important;
-  width: 100% !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
+  position: absolute !important; left: -9999px !important; top: -9999px !important;
+  width: 100% !important; visibility: hidden !important; pointer-events: none !important;
   z-index: -1 !important;
 }
-
 .navbar_menu{ position: relative !important; }
 .navbar_menu-dropdown{ position: static !important; }
-
 .navbar_dropdown-list{
-  display: block !important;
-  position: absolute !important;
-  left: 0 !important;
-  right: 0 !important;
-  top: 0 !important;
-  width: 100% !important;
-  box-sizing: border-box !important;
-  z-index: 2;
-  background: transparent !important;
-  border-radius: 0 !important;
-  overflow: hidden;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
+  display: block !important; position: absolute !important;
+  left: 0 !important; right: 0 !important; top: 0 !important;
+  width: 100% !important; box-sizing: border-box !important;
+  z-index: 2; background: transparent !important; border-radius: 0 !important;
+  overflow: hidden; opacity: 0; visibility: hidden; pointer-events: none;
   will-change: opacity;
 }
-
 .nav-page-overlay{
-  position: fixed;
-  inset: 0;
-  z-index: 900;
-  pointer-events: none;
+  position: fixed; inset: 0; z-index: 900; pointer-events: none;
   background: rgba(15, 15, 15, ${CONFIG.overlayOpacity});
   opacity: 0;
-  backdrop-filter: blur(0px);
-  -webkit-backdrop-filter: blur(0px);
+  backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px);
   will-change: opacity, backdrop-filter;
 }
 .nav-page-overlay.is-visible{
-  opacity: 1;
-  pointer-events: auto;
+  opacity: 1; pointer-events: auto;
   backdrop-filter: blur(${CONFIG.overlayBlurPx}px);
   -webkit-backdrop-filter: blur(${CONFIG.overlayBlurPx}px);
 }
-
 .navbar_dropdwn-toggle{
   border-radius: ${CONFIG.toggleRadiusPx}px !important;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
 .navbar_dropdwn-toggle.is-app{
   background-color: ${CONFIG.appToggleBg} !important;
   color: ${CONFIG.appToggleText} !important;
 }
-
-.dropdown-grid-right,
-.dropdown-grid-app,
-.dropdown-left-content-icon-wrapper{
+.dropdown-grid-right, .dropdown-grid-app, .dropdown-left-content-icon-wrapper{
   background-color: #202020 !important;
 }
-.navbar_dropdown-list,
-.navbar_dropdown-list *{
-  color: #ffffff !important;
-}
+.navbar_dropdown-list, .navbar_dropdown-list *{ color: #ffffff !important; }
     `.trim();
 
     styleElement = document.createElement("style");
-    styleElement.id = "navbar-animation-styles";
+    styleElement.id = "wd-navbar-desktop-styles";
     styleElement.textContent = css;
     document.head.appendChild(styleElement);
   }
 
-  // =============================================
-  // DOM SETUP
-  // =============================================
   function createOverlay() {
     pageOverlay = document.querySelector(".nav-page-overlay");
     if (!pageOverlay) {
@@ -503,26 +329,21 @@
       pageOverlay.className = "nav-page-overlay";
       document.body.appendChild(pageOverlay);
     }
-    addTrackedListener(pageOverlay, "click", () => {
-      if (isOpen) closeMenu();
-    });
+    addL(pageOverlay, "click", () => { if (isOpen) closeMenu(); });
   }
 
-  function createDropdownPortal() {
+  function createPortal() {
     dropdownPortal = navbarContainer.querySelector(".navbar-dropdown-portal");
     if (!dropdownPortal) {
       dropdownPortal = document.createElement("div");
       dropdownPortal.className = "navbar-dropdown-portal";
       navbarContainer.appendChild(dropdownPortal);
     }
-
     dropdownPortal.style.top = `${originalNavbarHeight}px`;
-
-    for (let i = 0; i < menuDropdowns.length; i++) {
-      const dropdown = menuDropdowns[i];
-      const list = dropdown.querySelector(".navbar_dropdown-list");
+    for (const dd of menuDropdowns) {
+      const list = dd.querySelector(".navbar_dropdown-list");
       if (list) {
-        dropdownListMap.set(dropdown, list);
+        dropdownListMap.set(dd, list);
         dropdownPortal.appendChild(list);
       }
     }
@@ -535,306 +356,182 @@
   }
 
   function prepareDropdowns() {
-    const chevronTransition = `transform ${CONFIG.openMs}ms ${CONFIG.ease}`;
-    for (let i = 0; i < menuDropdowns.length; i++) {
-      const chevron = menuDropdowns[i].querySelector(".dropdown-chevron");
-      if (chevron) chevron.style.transition = chevronTransition;
+    for (const dd of menuDropdowns) {
+      const ch = dd.querySelector(".dropdown-chevron");
+      if (ch) ch.style.transition = `transform ${CONFIG.openMs}ms ${CONFIG.ease}`;
     }
   }
 
   function disableWebflowBehavior() {
-    for (let i = 0; i < menuDropdowns.length; i++) {
-      menuDropdowns[i].removeAttribute("data-hover");
-      menuDropdowns[i].removeAttribute("data-delay");
+    for (const dd of menuDropdowns) {
+      dd.removeAttribute("data-hover");
+      dd.removeAttribute("data-delay");
     }
   }
 
-  // =============================================
-  // EVENTS
-  // =============================================
-  function bindEvents() {
-    addTrackedListener(navbarContainer, "pointerleave", (e) => {
-      if (e.pointerType === "touch") return;
-      // relatedTarget is null when leaving window/chrome — treat as leaving
-      const into = e.relatedTarget;
-      if (!into || !navbarContainer.contains(into)) {
-        requestClose();
+  function enhanceToggleA11y() {
+    for (const t of allToggles) {
+      if (!t.hasAttribute("aria-haspopup")) t.setAttribute("aria-haspopup", "true");
+      if (!t.hasAttribute("aria-expanded")) t.setAttribute("aria-expanded", "false");
+      if (t.tagName !== "BUTTON" && !t.hasAttribute("role")) {
+        t.setAttribute("role", "button");
+        if (!t.hasAttribute("tabindex")) t.setAttribute("tabindex", "0");
       }
-    });
+    }
+  }
 
-    addTrackedListener(navbarContainer, "pointerenter", (e) => {
+  function bindEvents() {
+    addL(navbarContainer, "pointerleave", (e) => {
+      if (e.pointerType === "touch") return;
+      const into = e.relatedTarget;
+      if (!into || !navbarContainer.contains(into)) requestClose();
+    });
+    addL(navbarContainer, "pointerenter", (e) => {
       if (e.pointerType === "touch") return;
       if (isOpen) cancelClose();
     });
+    addL(navbarContainer, "pointercancel", () => cancelClose());
 
-    // Cancel pending opens if the pointer input is canceled (browser takeover)
-    addTrackedListener(navbarContainer, "pointercancel", () => {
-      // If we're mid-open intent but not yet open, clear the intent
-      cancelClose();
-    });
-
-    for (let i = 0; i < menuDropdowns.length; i++) {
-      const dropdown = menuDropdowns[i];
-      const toggle = dropdown.querySelector(".navbar_dropdwn-toggle");
-      const list = getListForDropdown(dropdown);
+    for (const dd of menuDropdowns) {
+      const toggle = dd.querySelector(".navbar_dropdwn-toggle");
+      const list = getListFor(dd);
       if (!toggle || !list) continue;
 
-      addTrackedListener(toggle, "pointerenter", (e) => {
+      addL(toggle, "pointerenter", (e) => {
         if (e.pointerType === "touch") return;
         cancelClose();
-        if (!isOpen || currentDropdown !== dropdown) openOrSwitch(dropdown);
+        if (!isOpen || currentDropdown !== dd) openOrSwitch(dd);
       });
-
-      addTrackedListener(toggle, "click", (e) => {
+      addL(toggle, "click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-
-        if (isOpen && currentDropdown === dropdown) {
-          closeMenu();
-        } else {
-          openOrSwitch(dropdown);
-        }
+        if (isOpen && currentDropdown === dd) closeMenu();
+        else openOrSwitch(dd);
       });
-
-      addTrackedListener(toggle, "keydown", (e) => {
+      addL(toggle, "keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          if (isOpen && currentDropdown === dropdown) closeMenu();
-          else openOrSwitch(dropdown);
+          if (isOpen && currentDropdown === dd) closeMenu();
+          else openOrSwitch(dd);
         }
-        if (e.key === "Escape" && isOpen) {
-          closeMenu();
-          toggle.focus();
-        }
+        if (e.key === "Escape" && isOpen) { closeMenu(); toggle.focus(); }
       });
     }
 
-    addTrackedListener(document, "keydown", (e) => {
+    addL(document, "keydown", (e) => {
       if (e.key === "Escape" && isOpen) closeMenu();
     });
-
-    addTrackedListener(
-      document,
-      "pointerdown",
-      (e) => {
-        if (!isOpen) return;
-        if (
-          !navbarContainer.contains(e.target) &&
-          !pageOverlay.contains(e.target)
-        ) {
-          closeMenu();
-        }
-      },
-      { passive: true }
-    );
+    addL(document, "pointerdown", (e) => {
+      if (!isOpen) return;
+      if (!navbarContainer.contains(e.target) && !pageOverlay.contains(e.target)) closeMenu();
+    }, { passive: true });
   }
 
   function bindScrollListener() {
-    const updateScrolledState = (y) => {
+    const update = (y) => {
       const scrolled = (y || 0) > CONFIG.scrollThreshold;
       if (scrolled !== isScrolled) {
         isScrolled = scrolled;
-        if (!isOpen) {
-          applyTransitions(CONFIG.closeMs);
-          applyTheme();
-        }
+        if (!isOpen) { applyTransitions(CONFIG.closeMs); applyTheme(); }
       }
     };
 
-    smoothScrollInstance = getLenisLikeInstance();
-    if (
-      smoothScrollInstance &&
-      typeof smoothScrollInstance.on === "function"
-    ) {
-      const handler = (e) => {
-        const y =
-          e && typeof e.scroll === "number" ? e.scroll : getScrollTop();
-        updateScrolledState(y);
-      };
+    smoothScrollInstance = getLenisLike();
+    if (smoothScrollInstance?.on) {
+      const handler = (e) => update(typeof e?.scroll === "number" ? e.scroll : getScrollTop());
       smoothScrollInstance.on("scroll", handler);
-      smoothScrollUnsub = () => {
-        if (typeof smoothScrollInstance.off === "function") {
-          smoothScrollInstance.off("scroll", handler);
-        }
-      };
-      updateScrolledState(getScrollTop());
+      smoothScrollUnsub = () => smoothScrollInstance.off?.("scroll", handler);
+      update(getScrollTop());
     } else {
       const onScroll = () => {
         lastScrollY = getScrollTop();
         if (!scrollTicking) {
-          requestAnimationFrame(() => {
-            updateScrolledState(lastScrollY);
-            scrollTicking = false;
-          });
+          requestAnimationFrame(() => { update(lastScrollY); scrollTicking = false; });
           scrollTicking = true;
         }
       };
-      addTrackedListener(window, "scroll", onScroll, { passive: true });
-      updateScrolledState(getScrollTop());
+      addL(window, "scroll", onScroll, { passive: true });
+      update(getScrollTop());
     }
   }
 
-  // Single consolidated resize handler:
-  // - invalidates height cache
-  // - updates touch detection
-  // - repositions portal
-  // - lets top-level viewport handler decide init/destroy
-  function bindResizeListener() {
-    addTrackedListener(
-      window,
-      "resize",
-      () => {
-        clearTimeout(resizeTimeout);
-        resizeTimeout = setTimeout(() => {
-          dropdownHeightCache = new WeakMap();
-          isTouchDevice = detectTouch();
-          if (navbarContainer && dropdownPortal) {
-            originalNavbarHeight = navbarContainer.offsetHeight;
-            dropdownPortal.style.top = `${originalNavbarHeight}px`;
-          }
-        }, 200);
-      },
-      { passive: true }
-    );
-  }
-
-  // =============================================
-  // CLOSE TIMER
-  // =============================================
   function cancelClose() {
-    if (closeTimer) {
-      clearTimeout(closeTimer);
-      closeTimer = null;
-    }
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
   }
-
   function requestClose() {
     cancelClose();
     closeTimer = setTimeout(closeMenu, CONFIG.closeDelayMs);
   }
-
-  function cancelPendingAnimations() {
-    if (switchTimeout) {
-      clearTimeout(switchTimeout);
-      switchTimeout = null;
-    }
-    if (closeFallbackTimeout) {
-      clearTimeout(closeFallbackTimeout);
-      closeFallbackTimeout = null;
-    }
+  function cancelPending() {
+    if (switchTimeout) { clearTimeout(switchTimeout); switchTimeout = null; }
+    if (closeFallbackTimeout) { clearTimeout(closeFallbackTimeout); closeFallbackTimeout = null; }
   }
 
-  // =============================================
-  // MEASURE HEIGHT
-  // =============================================
-  function measureListHeight(list) {
+  function measureList(list) {
     const cached = dropdownHeightCache.get(list);
     if (cached !== undefined) return cached;
-
     const clone = list.cloneNode(true);
     clone.style.cssText =
       "position:relative!important;top:auto!important;opacity:1!important;" +
-      "visibility:visible!important;display:block!important;pointer-events:none!important;" +
-      "width:100%!important;";
-
+      "visibility:visible!important;display:block!important;pointer-events:none!important;width:100%!important;";
     measureContainer.appendChild(clone);
-    const height = clone.offsetHeight;
+    const h = clone.offsetHeight;
     measureContainer.removeChild(clone);
-
-    dropdownHeightCache.set(list, height);
-    return height;
+    dropdownHeightCache.set(list, h);
+    return h;
   }
 
-  // Thoroughly reset list styles so stale inline values from killed
-  // switch/close animations don't leak into the next open
   function fullyResetListStyles(list) {
     if (!list) return;
     list.style.transition = "none";
     list.style.opacity = "0";
     list.style.visibility = "hidden";
     list.style.pointerEvents = "none";
+    for (const sel of MORPH_SELECTORS) {
+      const el = list.querySelector(sel);
+      if (el) { el.style.transition = "none"; el.style.opacity = "1"; }
+    }
+  }
 
-    // Reset morphable children too — switchMenu sets opacity:0 on these
-    for (const selector of MORPH_SELECTORS) {
-      const el = list.querySelector(selector);
-      if (el) {
-        el.style.transition = "none";
-        el.style.opacity = "1";
+  function resetAllLists(except = null) {
+    for (const list of allDropdownLists) {
+      if (list && list !== except) fullyResetListStyles(list);
+    }
+    for (const dd of menuDropdowns) {
+      if (dd !== currentDropdown) {
+        const ch = dd.querySelector(".dropdown-chevron");
+        if (ch) ch.style.transform = "rotate(0deg)";
+        const t = dd.querySelector(".navbar_dropdwn-toggle");
+        if (t) t.setAttribute("aria-expanded", "false");
       }
     }
   }
 
-  function resetAllLists(exceptList = null) {
-    for (let i = 0; i < allDropdownLists.length; i++) {
-      const list = allDropdownLists[i];
-      if (list && list !== exceptList) {
-        fullyResetListStyles(list);
-      }
-    }
-
-    for (let i = 0; i < menuDropdowns.length; i++) {
-      if (menuDropdowns[i] !== currentDropdown) {
-        const chevron = menuDropdowns[i].querySelector(".dropdown-chevron");
-        if (chevron) chevron.style.transform = "rotate(0deg)";
-        const toggle = menuDropdowns[i].querySelector(
-          ".navbar_dropdwn-toggle"
-        );
-        if (toggle) toggle.setAttribute("aria-expanded", "false");
-      }
-    }
+  function openOrSwitch(dd) {
+    if (currentDropdown === dd) return;
+    cancelPending();
+    if (isOpen && currentDropdown) switchMenu(dd);
+    else openMenu(dd);
   }
 
-  // =============================================
-  // OPEN / SWITCH / CLOSE
-  // =============================================
-  const MORPH_SELECTORS = [
-    ".dropdown-grid-left",
-    ".dropdown-grid-right",
-    ".dropdown-grid-app",
-    ".dropdown-content-wrapper",
-  ];
-
-  // Cache morphable elements per list (low priority optimization from analysis)
-  const morphCache = new WeakMap();
-  function getMorphableElements(list) {
-    let cached = morphCache.get(list);
-    if (cached) return cached;
-    cached = {};
-    for (const selector of MORPH_SELECTORS) {
-      const el = list.querySelector(selector);
-      if (el) cached[selector] = el;
-    }
-    morphCache.set(list, cached);
-    return cached;
-  }
-
-  function openOrSwitch(dropdown) {
-    if (currentDropdown === dropdown) return;
-    cancelPendingAnimations();
-    if (isOpen && currentDropdown) switchMenu(dropdown);
-    else openMenu(dropdown);
-  }
-
-  function openMenu(dropdown) {
-    const list = getListForDropdown(dropdown);
+  function openMenu(dd) {
+    const list = getListFor(dd);
     if (!list) return;
-
     cancelClose();
-    cancelPendingAnimations();
+    cancelPending();
     resetAllLists(list);
 
-    currentDropdown = dropdown;
+    currentDropdown = dd;
     currentList = list;
     isOpen = true;
 
-    const dropdownHeight = measureListHeight(list);
-
+    const h = measureList(list);
     list.style.transition = "none";
     list.style.opacity = "0";
     list.style.visibility = "visible";
     list.style.pointerEvents = "auto";
 
-    dropdownPortal.style.height = `${dropdownHeight}px`;
+    dropdownPortal.style.height = `${h}px`;
     dropdownPortal.classList.add("is-open");
 
     void navbarContainer.offsetHeight;
@@ -842,125 +539,94 @@
     applyTransitions(CONFIG.openMs);
     applyTheme();
 
-    const chevron = dropdown.querySelector(".dropdown-chevron");
-    if (chevron) chevron.style.transform = "rotate(180deg)";
-    dropdown
-      .querySelector(".navbar_dropdwn-toggle")
-      ?.setAttribute("aria-expanded", "true");
+    const ch = dd.querySelector(".dropdown-chevron");
+    if (ch) ch.style.transform = "rotate(180deg)";
+    dd.querySelector(".navbar_dropdwn-toggle")?.setAttribute("aria-expanded", "true");
 
     pageOverlay.classList.add("is-visible");
+    setExpandedSpace(h, CONFIG.openMs);
 
-    setExpandedSpace(dropdownHeight, CONFIG.openMs);
-
-    const dur = `${CONFIG.openMs}ms`;
-    const ease = CONFIG.ease;
-    list.style.transition = `opacity ${dur} ${ease}`;
+    list.style.transition = `opacity ${CONFIG.openMs}ms ${CONFIG.ease}`;
     list.style.opacity = "1";
   }
 
-  function switchMenu(nextDropdown) {
-    const prevDropdown = currentDropdown;
+  function switchMenu(next) {
+    const prev = currentDropdown;
     const prevList = currentList;
-    const nextList = getListForDropdown(nextDropdown);
-    if (!nextList) return;
-    if (nextDropdown === prevDropdown) return;
+    const nextList = getListFor(next);
+    if (!nextList || next === prev) return;
 
     cancelClose();
-    cancelPendingAnimations();
+    cancelPending();
 
-    currentDropdown = nextDropdown;
+    currentDropdown = next;
     currentList = nextList;
 
-    const nextDropdownHeight = measureListHeight(nextList);
+    const h = measureList(nextList);
     const dur = `${CONFIG.switchMs}ms`;
     const ease = CONFIG.ease;
+    const prevEls = prevList ? getMorphable(prevList) : {};
+    const nextEls = getMorphable(nextList);
 
-    const prevElements = prevList ? getMorphableElements(prevList) : {};
-    const nextElements = getMorphableElements(nextList);
-
-    if (prevList) {
-      prevList.style.pointerEvents = "none";
-    }
+    if (prevList) prevList.style.pointerEvents = "none";
 
     nextList.style.transition = "none";
     nextList.style.opacity = "1";
     nextList.style.visibility = "visible";
     nextList.style.pointerEvents = "auto";
 
-    for (const selector in nextElements) {
-      const el = nextElements[selector];
-      el.style.transition = "none";
-      el.style.opacity = "0";
+    for (const sel in nextEls) {
+      nextEls[sel].style.transition = "none";
+      nextEls[sel].style.opacity = "0";
     }
-
     void nextList.offsetHeight;
-
-    for (const selector in prevElements) {
-      const prevEl = prevElements[selector];
-      prevEl.style.transition = `opacity ${dur} ${ease}`;
-      prevEl.style.opacity = "0";
+    for (const sel in prevEls) {
+      prevEls[sel].style.transition = `opacity ${dur} ${ease}`;
+      prevEls[sel].style.opacity = "0";
+    }
+    for (const sel in nextEls) {
+      nextEls[sel].style.transition = `opacity ${dur} ${ease}`;
+      nextEls[sel].style.opacity = "1";
     }
 
-    for (const selector in nextElements) {
-      const nextEl = nextElements[selector];
-      nextEl.style.transition = `opacity ${dur} ${ease}`;
-      nextEl.style.opacity = "1";
-    }
-
-    if (prevList && Object.keys(prevElements).length === 0) {
+    if (prevList && Object.keys(prevEls).length === 0) {
       prevList.style.transition = `opacity ${dur} ${ease}`;
       prevList.style.opacity = "0";
     }
 
-    if (prevDropdown) {
-      const prevChevron = prevDropdown.querySelector(".dropdown-chevron");
-      if (prevChevron) {
-        prevChevron.style.transition = `transform ${dur} ${ease}`;
-        prevChevron.style.transform = "rotate(0deg)";
-      }
-      prevDropdown
-        .querySelector(".navbar_dropdwn-toggle")
-        ?.setAttribute("aria-expanded", "false");
+    if (prev) {
+      const pc = prev.querySelector(".dropdown-chevron");
+      if (pc) { pc.style.transition = `transform ${dur} ${ease}`; pc.style.transform = "rotate(0deg)"; }
+      prev.querySelector(".navbar_dropdwn-toggle")?.setAttribute("aria-expanded", "false");
     }
 
-    const nextChevron = nextDropdown.querySelector(".dropdown-chevron");
-    if (nextChevron) {
-      nextChevron.style.transition = `transform ${dur} ${ease}`;
-      nextChevron.style.transform = "rotate(180deg)";
-    }
+    const nc = next.querySelector(".dropdown-chevron");
+    if (nc) { nc.style.transition = `transform ${dur} ${ease}`; nc.style.transform = "rotate(180deg)"; }
 
-    const toggleTransition = `background-color ${dur} ${ease}, color ${dur} ${ease}`;
-    for (let i = 0; i < allToggles.length; i++) {
-      allToggles[i].style.transition = toggleTransition;
+    for (const t of allToggles) {
+      t.style.transition = `background-color ${dur} ${ease}, color ${dur} ${ease}`;
     }
     applyTheme();
 
     dropdownPortal.style.transition = `height ${dur} ${ease}`;
-    dropdownPortal.style.height = `${nextDropdownHeight}px`;
-    setExpandedSpace(nextDropdownHeight, CONFIG.switchMs);
+    dropdownPortal.style.height = `${h}px`;
+    setExpandedSpace(h, CONFIG.switchMs);
 
-    nextDropdown
-      .querySelector(".navbar_dropdwn-toggle")
-      ?.setAttribute("aria-expanded", "true");
+    next.querySelector(".navbar_dropdwn-toggle")?.setAttribute("aria-expanded", "true");
 
-    const listToClean = prevList;
-    const prevElementsToReset = { ...prevElements };
+    const toClean = prevList;
+    const prevElsToReset = { ...prevEls };
     switchTimeout = setTimeout(() => {
-      if (listToClean && currentList !== listToClean) {
-        listToClean.style.transition = "none";
-        listToClean.style.opacity = "0";
-        listToClean.style.visibility = "hidden";
-        listToClean.style.pointerEvents = "none";
-
-        for (const selector in prevElementsToReset) {
-          const el = prevElementsToReset[selector];
-          if (el) {
-            el.style.transition = "none";
-            el.style.opacity = "1";
-          }
+      if (toClean && currentList !== toClean) {
+        toClean.style.transition = "none";
+        toClean.style.opacity = "0";
+        toClean.style.visibility = "hidden";
+        toClean.style.pointerEvents = "none";
+        for (const sel in prevElsToReset) {
+          const el = prevElsToReset[sel];
+          if (el) { el.style.transition = "none"; el.style.opacity = "1"; }
         }
       }
-
       dropdownPortal.style.transition = "none";
       switchTimeout = null;
     }, CONFIG.switchMs + 50);
@@ -968,13 +634,11 @@
 
   function closeMenu() {
     if (!isOpen) return;
-
     cancelClose();
-    cancelPendingAnimations();
+    cancelPending();
 
-    const dropdown = currentDropdown;
+    const dd = currentDropdown;
     const list = currentList;
-
     currentDropdown = null;
     currentList = null;
     isOpen = false;
@@ -990,15 +654,12 @@
 
     applyTransitions(CONFIG.closeMs);
     applyTheme();
-
     pageOverlay.classList.remove("is-visible");
 
-    if (dropdown) {
-      const chevron = dropdown.querySelector(".dropdown-chevron");
-      if (chevron) chevron.style.transform = "rotate(0deg)";
-      dropdown
-        .querySelector(".navbar_dropdwn-toggle")
-        ?.setAttribute("aria-expanded", "false");
+    if (dd) {
+      const ch = dd.querySelector(".dropdown-chevron");
+      if (ch) ch.style.transform = "rotate(0deg)";
+      dd.querySelector(".navbar_dropdwn-toggle")?.setAttribute("aria-expanded", "false");
     }
 
     setExpandedSpace(0, CONFIG.closeMs);
@@ -1015,185 +676,177 @@
     }, CONFIG.closeMs + CONFIG.closeFallbackBuffer);
   }
 
-  // =============================================
-  // DESTROY
-  // =============================================
+  function init() {
+    navbarContainer = document.querySelector(".navbar_container");
+    if (!navbarContainer) return;
+
+    requestAnimationFrame(() => {
+      if (!navbarContainer) return;
+      const style = getComputedStyle(navbarContainer);
+      originalPaddingBottom = style.paddingBottom || "0px";
+      originalMarginBottom = style.marginBottom || "0px";
+      originalNavbarHeight = navbarContainer.offsetHeight;
+
+      menuDropdowns = Array.from(document.querySelectorAll(".navbar_menu-dropdown"));
+      allTextElements = Array.from(document.querySelectorAll(".navbar_logo, .navbar_link, .navbar_dropdwn-toggle"));
+      allToggles = Array.from(document.querySelectorAll(".navbar_menu-dropdown .navbar_dropdwn-toggle"));
+
+      injectStyles();
+      createOverlay();
+      createPortal();
+      createMeasureContainer();
+      prepareDropdowns();
+      disableWebflowBehavior();
+      enhanceToggleA11y();
+      bindEvents();
+      bindScrollListener();
+
+      allDropdownLists = Array.from(dropdownPortal.querySelectorAll(".navbar_dropdown-list"));
+
+      requestAnimationFrame(() => {
+        applyTransitions(0);
+        applyTheme();
+        requestAnimationFrame(() => applyTransitions(CONFIG.closeMs));
+      });
+    });
+
+    motionQuery?.addEventListener?.("change", applyMotion);
+  }
+
   function destroy() {
     cancelClose();
-    cancelPendingAnimations();
-    clearTimeout(resizeTimeout);
+    cancelPending();
+    motionQuery?.removeEventListener?.("change", applyMotion);
 
-    dropdownListMap.forEach((list, dropdown) => {
-      if (list && dropdown && list.parentNode === dropdownPortal) {
-        dropdown.appendChild(list);
-      }
+    // Return dropdown lists to their original parents
+    dropdownListMap.forEach((list, dd) => {
+      if (list && dd && list.parentNode === dropdownPortal) dd.appendChild(list);
     });
     dropdownListMap.clear();
+    morphCache = new WeakMap();
 
-    for (let i = 0; i < boundEventListeners.length; i++) {
-      const { el, event, handler, options } = boundEventListeners[i];
+    for (const { el, event, handler, options } of boundListeners) {
       el.removeEventListener(event, handler, options);
     }
-    boundEventListeners = [];
+    boundListeners = [];
 
-    if (smoothScrollUnsub) {
-      smoothScrollUnsub();
-      smoothScrollUnsub = null;
-    }
+    if (smoothScrollUnsub) { smoothScrollUnsub(); smoothScrollUnsub = null; }
 
-    if (styleElement && styleElement.parentNode) {
-      styleElement.parentNode.removeChild(styleElement);
-      styleElement = null;
-    }
+    styleElement?.parentNode?.removeChild(styleElement);
+    styleElement = null;
+    pageOverlay?.parentNode?.removeChild(pageOverlay);
+    dropdownPortal?.parentNode?.removeChild(dropdownPortal);
+    measureContainer?.parentNode?.removeChild(measureContainer);
 
-    if (pageOverlay && pageOverlay.parentNode) {
-      pageOverlay.parentNode.removeChild(pageOverlay);
-    }
-
-    if (dropdownPortal && dropdownPortal.parentNode) {
-      dropdownPortal.parentNode.removeChild(dropdownPortal);
-    }
-
-    if (measureContainer && measureContainer.parentNode) {
-      measureContainer.parentNode.removeChild(measureContainer);
-    }
-
+    // CRITICAL: Strip every inline style we applied so mobile starts clean
     if (navbarContainer) {
-      navbarContainer.style.paddingBottom = originalPaddingBottom;
-      navbarContainer.style.marginBottom = originalMarginBottom;
+      navbarContainer.style.transition = "";
+      navbarContainer.style.backgroundColor = "";
+      navbarContainer.style.backdropFilter = "";
+      navbarContainer.style.webkitBackdropFilter = "";
+      navbarContainer.style.paddingBottom = "";
+      navbarContainer.style.marginBottom = "";
+      navbarContainer.style.maxWidth = "";
+    }
+    for (const el of allTextElements) {
+      el.style.color = "";
+      el.style.transition = "";
+    }
+    for (const t of allToggles) {
+      t.style.backgroundColor = "";
+      t.style.color = "";
+      t.style.transition = "";
+    }
+    for (const dd of menuDropdowns) {
+      const ch = dd.querySelector(".dropdown-chevron");
+      if (ch) { ch.style.transform = ""; ch.style.transition = ""; }
+      const t = dd.querySelector(".navbar_dropdwn-toggle");
+      if (t) t.setAttribute("aria-expanded", "false");
     }
 
     navbarContainer = null;
     dropdownPortal = null;
     pageOverlay = null;
     measureContainer = null;
-
     menuDropdowns = [];
     allTextElements = [];
     allToggles = [];
     allDropdownLists = [];
-
     isScrolled = false;
     isOpen = false;
     currentDropdown = null;
     currentList = null;
-
     smoothScrollInstance = null;
     dropdownHeightCache = new WeakMap();
-
     originalPaddingBottom = null;
     originalMarginBottom = null;
     originalNavbarHeight = null;
-
-    window.__navbarAnimationInitialized = false;
   }
 
-  window.__navbarAnimationDestroy = destroy;
-
-  // =============================================
-  // START — Desktop only (992px+)
-  // =============================================
-  const DESKTOP_MIN = SHARED.DESKTOP_MIN;
-
-  function handleViewport() {
-    if (window.innerWidth >= DESKTOP_MIN) {
-      if (!window.__navbarAnimationInitialized) init();
-    } else {
-      if (
-        window.__navbarAnimationInitialized &&
-        window.__navbarAnimationDestroy
-      ) {
-        window.__navbarAnimationDestroy();
-      }
-    }
-  }
-
-  function onReady() {
-    handleViewport();
-    window.addEventListener("resize", () => {
-      clearTimeout(window.__navbarViewportTimeout);
-      window.__navbarViewportTimeout = setTimeout(handleViewport, 200);
-    });
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", onReady);
-  } else {
-    onReady();
-  }
+  SHARED.desktopInit = init;
+  SHARED.desktopDestroy = destroy;
 })();
 
 
 /* ═══════════════════════════════════════════════
-   MOBILE NAV — ≤991px
-   Class-based state, GPU-only transforms, iOS-optimized
+   MOBILE NAV (≤991px)
+   Pure class-based. No JS style thrashing.
    ═══════════════════════════════════════════════ */
-
 (() => {
   "use strict";
+  const SHARED = window.__wdNavShared;
 
-  const SHARED = window.__watchDutyNavShared;
-
-  if (window.__mobileNavInitialized) {
-    window.__mobileNavDestroy?.();
-  }
-  window.__mobileNavInitialized = true;
-
-  const MOBILE_MAX = SHARED.MOBILE_MAX;
-  const SCROLL_THRESHOLD = SHARED.SCROLL_THRESHOLD;
-
-  // Snappy mobile timings — not too fast (feels unfinished), not too slow
   const OPEN_MS = 280;
   const CLOSE_MS = 220;
   const DD_OPEN_MS = 240;
   const DD_CLOSE_MS = 200;
   const EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
+  const SCROLL_THRESHOLD = 48;
+  const TOUCH_DEDUPE_MS = 600;
 
   const STATE = { CLOSED: 0, OPEN: 1 };
   let state = STATE.CLOSED;
   let isScrolled = false;
 
-  const body = document.body;
-  const navButton = document.querySelector(".w-nav-button");
-  const navbarComponent = document.querySelector(".navbar_component");
-  const navbarContainer = document.querySelector(".navbar_container");
-  const navbarMenu = document.querySelector(".navbar_menu");
-  const navOverlay = document.querySelector(".w-nav-overlay");
-
-  if (!navButton || !navbarContainer) {
-    window.__mobileNavInitialized = false;
-    return;
-  }
-
-  // ── Cleanup tracking ──
-  const observers = [];
-  const trackedListeners = [];
-  const dropdownResets = [];
+  let body, navButton, navbarComponent, navbarContainer, navbarMenu, navOverlay;
+  let observers = [];
+  let listeners = [];
+  let dropdownResets = [];
+  let styleEl = null;
+  let lastTouchAt = 0;
+  let scrollYOnOpen = 0;
+  let scrollTicking = false;
 
   function addL(el, event, handler, options) {
     if (!el) return;
     el.addEventListener(event, handler, options);
-    trackedListeners.push({ el, event, handler, options });
+    listeners.push({ el, event, handler, options });
   }
 
-  function trackObserver(o) {
-    observers.push(o);
-    return o;
+  function trackObs(o) { observers.push(o); return o; }
+
+  function injectStyles() {
+    const existing = document.getElementById("wd-navbar-mobile-styles");
+    if (existing) existing.remove();
+
+    styleEl = document.createElement("style");
+    styleEl.id = "wd-navbar-mobile-styles";
+    styleEl.textContent = `
+@media (max-width: 991px) {
+  /* Override any desktop inline styles that might leak through */
+  .navbar_container {
+    padding-bottom: 0 !important;
+    margin-bottom: 0 !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    overflow: visible !important;
+    max-width: 100% !important;
+    background-color: transparent !important;
+    transition: background-color ${CLOSE_MS}ms ${EASE} !important;
+    will-change: background-color;
   }
 
-  function isMobile() {
-    return window.innerWidth <= MOBILE_MAX;
-  }
-
-  // ── STATIC STYLESHEET ──
-  // Everything is class-based. No JS-driven style values.
-  // Only opacity + transform animate → GPU-composited on iOS WebKit.
-  // No backdrop-filter on mobile — kills performance.
-  const styleEl = document.createElement("style");
-  styleEl.id = "mobile-nav-styles";
-  styleEl.textContent = `
-@media (max-width: ${MOBILE_MAX}px) {
-  /* ── Full-viewport menu breakout ── */
+  /* Full-viewport menu breakout */
   .w-nav-overlay {
     overflow: visible !important;
     display: block !important;
@@ -1208,22 +861,19 @@
     -webkit-transform: translate3d(0, 0, 0) !important;
     -webkit-backface-visibility: hidden;
     backface-visibility: hidden;
-
-    /* Menu fade — GPU compositing */
     opacity: 0;
     pointer-events: none;
     transition: opacity ${CLOSE_MS}ms ${EASE};
     will-change: opacity, transform;
   }
 
-  /* ── OPEN state — menu visible ── */
+  /* OPEN state */
   .navbar_component.is-m-open .navbar_menu {
     opacity: 1;
     pointer-events: auto;
     transition: opacity ${OPEN_MS}ms ${EASE};
   }
 
-  /* ── Base component styling ── */
   .navbar_component {
     border: none !important;
     border-bottom: none !important;
@@ -1235,27 +885,19 @@
     -webkit-transform: translateZ(0);
     will-change: background-color;
   }
-  .navbar_container {
-    background-color: transparent;
-    transition: background-color ${CLOSE_MS}ms ${EASE};
-    will-change: background-color;
-  }
 
-  /* ── Opening: switch transition duration ── */
-  .navbar_component.is-m-open {
-    transition: background-color ${OPEN_MS}ms ${EASE};
-  }
+  .navbar_component.is-m-open,
   .navbar_component.is-m-open .navbar_container {
-    transition: background-color ${OPEN_MS}ms ${EASE};
+    transition: background-color ${OPEN_MS}ms ${EASE} !important;
   }
 
-  /* ── DARK state (scrolled OR menu open) ── */
+  /* DARK state */
   .navbar_component.is-m-open,
   .navbar_container.is-m-dark {
     background-color: #000 !important;
   }
 
-  /* Text/icon colors — all share the same transition rhythm */
+  /* All text/icon transitions share timing with component */
   .navbar_logo,
   .navbar_link,
   .navbar_dropdwn-toggle,
@@ -1267,7 +909,7 @@
     transition:
       background-color ${CLOSE_MS}ms ${EASE},
       color ${CLOSE_MS}ms ${EASE},
-      border-color ${CLOSE_MS}ms ${EASE};
+      border-color ${CLOSE_MS}ms ${EASE} !important;
   }
   .navbar_component.is-m-open .navbar_logo,
   .navbar_component.is-m-open .navbar_link,
@@ -1280,7 +922,14 @@
     transition:
       background-color ${OPEN_MS}ms ${EASE},
       color ${OPEN_MS}ms ${EASE},
-      border-color ${OPEN_MS}ms ${EASE};
+      border-color ${OPEN_MS}ms ${EASE} !important;
+  }
+
+  /* Strip any inline color set by desktop JS */
+  .navbar_container .navbar_logo,
+  .navbar_container .navbar_link,
+  .navbar_container .navbar_dropdwn-toggle {
+    color: inherit !important;
   }
 
   .navbar_container.is-m-dark .navbar_logo,
@@ -1301,7 +950,7 @@
     background-color: #fff !important;
   }
 
-  /* ── DROPDOWNS inside mobile menu ── */
+  /* Dropdowns */
   .navbar_menu .navbar_dropdown-list {
     display: block !important;
     max-height: 0;
@@ -1312,18 +961,15 @@
   .navbar_menu .navbar_dropdown-list.is-dd-open {
     transition: max-height ${DD_OPEN_MS}ms ${EASE};
   }
-
   .navbar_menu .dropdown-chevron {
     transition: transform ${DD_CLOSE_MS}ms ${EASE};
     will-change: transform;
   }
-  .navbar_menu .navbar_dropdown-list.is-dd-open ~ * .dropdown-chevron,
   .navbar_menu .navbar_menu-dropdown.is-dd-open .dropdown-chevron {
     transform: rotate(180deg);
     transition: transform ${DD_OPEN_MS}ms ${EASE};
   }
 
-  /* Lock dropdown interior colors — prevent Webflow w--open shifts */
   .navbar_menu .navbar_dropdwn-toggle,
   .navbar_menu .navbar_dropdwn-toggle *,
   .navbar_menu .navbar_dropdown-list,
@@ -1332,7 +978,6 @@
     background-color: inherit !important;
   }
 
-  /* ── Touch targets — kill tap delay & highlight ── */
   .w-nav-button,
   .navbar_dropdwn-toggle,
   .navbar_link {
@@ -1340,48 +985,35 @@
     touch-action: manipulation;
   }
 
-  /* ── Body scroll lock ── */
   body.is-m-nav-open {
-    overflow: hidden;
-    position: fixed;
-    width: 100%;
-    top: var(--m-nav-scroll-y, 0);
+    overflow: hidden !important;
+    position: fixed !important;
+    width: 100% !important;
+    top: var(--m-nav-scroll-y, 0) !important;
+  }
+
+  /* Hide desktop-only DOM */
+  .navbar-dropdown-portal,
+  .navbar-measure-container,
+  .nav-page-overlay {
+    display: none !important;
   }
 }
-  `.trim();
-  document.head.appendChild(styleEl);
-
-  // ── Reduced motion ──
-  const motionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-  function updateMotion() {
-    // CSS handles this via prefers-reduced-motion media query if added,
-    // but the durations are fixed in the stylesheet. For true reduced
-    // motion support, we'd need to swap the stylesheet — omitted for
-    // simplicity since the timings are already short (~280ms max).
+    `.trim();
+    document.head.appendChild(styleEl);
   }
-  motionQuery?.addEventListener?.("change", updateMotion);
 
-  // ── STATE APPLICATION ──
-  // Single function, class-based. All animation is CSS-driven.
   function applyState() {
-    if (!isMobile()) return;
-
+    if (!SHARED.isMobile()) return;
     const menuOpen = state === STATE.OPEN;
     const dark = menuOpen || isScrolled;
-
     navbarComponent?.classList.toggle("is-m-open", menuOpen);
-    navbarContainer.classList.toggle("is-m-dark", dark);
+    navbarContainer?.classList.toggle("is-m-dark", dark);
   }
-
-  // ── SCROLL LOCK (iOS Safari-safe position:fixed technique) ──
-  let scrollYOnOpen = 0;
 
   function lockBodyScroll() {
     scrollYOnOpen = window.scrollY;
-    document.documentElement.style.setProperty(
-      "--m-nav-scroll-y",
-      `-${scrollYOnOpen}px`
-    );
+    document.documentElement.style.setProperty("--m-nav-scroll-y", `-${scrollYOnOpen}px`);
     body.classList.add("is-m-nav-open");
   }
 
@@ -1391,10 +1023,6 @@
     window.scrollTo(0, scrollYOnOpen);
   }
 
-  // ── OPEN / CLOSE / TOGGLE ──
-  // Instant state flip. CSS handles the animation.
-  // No interruption logic needed — CSS transitions naturally interrupt
-  // because they target the SAME property (opacity) with new values.
   function openMenu() {
     if (state === STATE.OPEN) return;
     state = STATE.OPEN;
@@ -1417,129 +1045,72 @@
   }
 
   function resetAllDropdowns() {
-    dropdownResets.forEach((fn) => fn());
+    for (const fn of dropdownResets) fn();
   }
 
-  // ── EVENT BINDING ──
-  // On iOS, event order is: touchstart → pointerdown → mousedown → click.
-  // touchstart fires ~20-50ms FASTER than pointerdown on iOS, so we use it
-  // as the primary trigger for touch, then dedupe the subsequent events.
-  let lastTouchToggleAt = 0;
-  const TOUCH_DEDUPE_MS = 600;
-
-  // Prevent Webflow's own click handler from running at all on mobile.
-  // We intercept at the earliest possible moment (touchstart) and block
-  // every downstream event it would cascade into.
-  addL(
-    navButton,
-    "touchstart",
-    (e) => {
-      if (!isMobile()) return;
-      if (e.touches && e.touches.length !== 1) return; // ignore multi-touch
-
-      lastTouchToggleAt = Date.now();
-
-      // Fire toggle synchronously — no setTimeout, no rAF, nothing.
-      // The class flip happens in the same tick as the touch.
+  function bindNavButton() {
+    addL(navButton, "touchstart", (e) => {
+      if (!SHARED.isMobile()) return;
+      if (e.touches && e.touches.length !== 1) return;
+      lastTouchAt = Date.now();
       toggleMenu();
-
-      // Stop every downstream event Webflow might act on
       e.preventDefault();
       e.stopPropagation();
-    },
-    { capture: true, passive: false }
-  );
+    }, { capture: true, passive: false });
 
-  // pointerdown fallback for stylus/pen (Apple Pencil on iPad)
-  addL(
-    navButton,
-    "pointerdown",
-    (e) => {
-      if (!isMobile()) return;
-      if (e.pointerType !== "pen") return; // touch already handled above
+    addL(navButton, "pointerdown", (e) => {
+      if (!SHARED.isMobile()) return;
+      if (e.pointerType !== "pen") return;
       if (e.button !== undefined && e.button !== 0) return;
-
-      lastTouchToggleAt = Date.now();
+      lastTouchAt = Date.now();
       toggleMenu();
       e.preventDefault();
       e.stopPropagation();
-    },
-    { capture: true, passive: false }
-  );
+    }, { capture: true, passive: false });
 
-  // Swallow the synthetic click that follows touchstart on iOS
-  addL(
-    navButton,
-    "click",
-    (e) => {
-      if (!isMobile()) return;
-
-      // If we just handled a touch, swallow the click entirely
-      if (Date.now() - lastTouchToggleAt < TOUCH_DEDUPE_MS) {
+    addL(navButton, "click", (e) => {
+      if (!SHARED.isMobile()) return;
+      if (Date.now() - lastTouchAt < TOUCH_DEDUPE_MS) {
         e.preventDefault();
         e.stopImmediatePropagation();
         return;
       }
-
-      // Pure mouse click (no prior touch) — handle it here
       e.preventDefault();
       e.stopImmediatePropagation();
       toggleMenu();
-    },
-    { capture: true }
-  );
+    }, { capture: true });
 
-  // Also swallow mousedown that comes from touch (Safari synthesizes it)
-  addL(
-    navButton,
-    "mousedown",
-    (e) => {
-      if (!isMobile()) return;
-      if (Date.now() - lastTouchToggleAt < TOUCH_DEDUPE_MS) {
+    addL(navButton, "mousedown", (e) => {
+      if (!SHARED.isMobile()) return;
+      if (Date.now() - lastTouchAt < TOUCH_DEDUPE_MS) {
         e.preventDefault();
         e.stopImmediatePropagation();
       }
-    },
-    { capture: true }
-  );
+    }, { capture: true });
+  }
 
-  // Overlay tap-to-close
-  if (navOverlay) {
-    addL(
-      navOverlay,
-      "pointerdown",
-      (e) => {
-        if (!isMobile()) return;
+  function bindOverlayAndMenu() {
+    if (navOverlay) {
+      addL(navOverlay, "pointerdown", (e) => {
+        if (!SHARED.isMobile()) return;
         if (state !== STATE.OPEN) return;
         if (e.target === navOverlay) closeMenu();
-      },
-      { capture: true }
-    );
-  }
+      }, { capture: true });
+    }
 
-  // Tap any link inside menu → close
-  if (navbarMenu) {
-    addL(
-      navbarMenu,
-      "click",
-      (e) => {
-        if (!isMobile()) return;
+    if (navbarMenu) {
+      addL(navbarMenu, "click", (e) => {
+        if (!SHARED.isMobile()) return;
         if (state !== STATE.OPEN) return;
         if (e.target.closest("a[href]")) {
-          // Small delay so the link's navigation starts before we close
           setTimeout(closeMenu, 0);
         }
-      },
-      true
-    );
+      }, true);
+    }
   }
 
-  // ── SCROLL ──
-  let scrollTicking = false;
-  addL(
-    window,
-    "scroll",
-    () => {
+  function bindScroll() {
+    addL(window, "scroll", () => {
       if (scrollTicking) return;
       scrollTicking = true;
       requestAnimationFrame(() => {
@@ -1548,49 +1119,21 @@
         if (was !== isScrolled) applyState();
         scrollTicking = false;
       });
-    },
-    { passive: true }
-  );
+    }, { passive: true });
+  }
 
-  // ── RESIZE ──
-  addL(window, "resize", () => {
-    if (!isMobile()) {
-      // Crossed to desktop — clean up mobile state
-      if (state === STATE.OPEN) {
-        state = STATE.CLOSED;
-        unlockBodyScroll();
-      }
-      navbarComponent?.classList.remove("is-m-open");
-      navbarContainer.classList.remove("is-m-dark");
-      resetAllDropdowns();
-    } else {
-      applyState();
-    }
-  });
-
-  // ── WEBFLOW SYNC ──
-  // Fallback only: if something else toggles w--open (keyboard, assistive tech,
-  // Webflow reaching through our guards), mirror state. But don't react if we
-  // JUST toggled — avoids feedback loop where our own handler triggers w--open
-  // which triggers this observer which re-triggers our handler.
-  trackObserver(
-    new MutationObserver(() => {
-      // Ignore mutations that happen within our own toggle window
-      if (Date.now() - lastTouchToggleAt < TOUCH_DEDUPE_MS) return;
-
+  function bindWebflowSync() {
+    trackObs(new MutationObserver(() => {
+      if (!SHARED.isMobile()) return;
+      if (Date.now() - lastTouchAt < TOUCH_DEDUPE_MS) return;
       const wfOpen = navButton.classList.contains("w--open");
-      if (wfOpen && state === STATE.CLOSED) {
-        openMenu();
-      } else if (!wfOpen && state === STATE.OPEN) {
-        closeMenu();
-      }
-    })
-  ).observe(navButton, { attributes: true, attributeFilter: ["class"] });
+      if (wfOpen && state === STATE.CLOSED) openMenu();
+      else if (!wfOpen && state === STATE.OPEN) closeMenu();
+    })).observe(navButton, { attributes: true, attributeFilter: ["class"] });
+  }
 
-  // ── DROPDOWNS INSIDE MENU ──
-  // Webflow toggles w--open on .navbar_dropdown-list when its toggle is tapped.
-  // We use that as our state signal — add/remove .is-dd-open class, CSS handles it.
-  if (navbarMenu) {
+  function bindDropdowns() {
+    if (!navbarMenu) return;
     const allDropdowns = navbarMenu.querySelectorAll(".navbar_menu-dropdown");
 
     allDropdowns.forEach((dd) => {
@@ -1609,120 +1152,115 @@
       }
       dropdownResets.push(resetDropdown);
 
-      // Observe Webflow's w--open → sync our own class
-      trackObserver(
-        new MutationObserver(() => {
-          if (!isMobile() || state !== STATE.OPEN) return;
+      trackObs(new MutationObserver(() => {
+        if (!SHARED.isMobile() || state !== STATE.OPEN) return;
+        const nowOpen = list.classList.contains("w--open");
+        if (nowOpen === ddOpen) return;
+        ddOpen = nowOpen;
+        clearTimeout(ddTimeout);
 
-          const nowOpen = list.classList.contains("w--open");
-          if (nowOpen === ddOpen) return;
-          ddOpen = nowOpen;
-          clearTimeout(ddTimeout);
-
-          if (ddOpen) {
-            // Measure natural height, set it inline, let CSS animate to it
-            const h = list.scrollHeight;
-            list.classList.add("is-dd-open");
-            dd.classList.add("is-dd-open");
-            list.style.maxHeight = h + "px";
-
-            // After transition, remove the cap so content can grow
-            ddTimeout = setTimeout(() => {
-              list.style.maxHeight = "none";
-            }, DD_OPEN_MS + 20);
-          } else {
-            // Closing: set current height, then collapse to 0
-            const h = list.scrollHeight;
-            list.style.maxHeight = h + "px";
-            // Force reflow so the next change animates from current height
-            void list.offsetHeight;
-            list.classList.remove("is-dd-open");
-            dd.classList.remove("is-dd-open");
-            list.style.maxHeight = "0";
-          }
-        })
-      ).observe(list, { attributes: true, attributeFilter: ["class"] });
+        if (ddOpen) {
+          const h = list.scrollHeight;
+          list.classList.add("is-dd-open");
+          dd.classList.add("is-dd-open");
+          list.style.maxHeight = h + "px";
+          ddTimeout = setTimeout(() => {
+            list.style.maxHeight = "none";
+          }, DD_OPEN_MS + 20);
+        } else {
+          const h = list.scrollHeight;
+          list.style.maxHeight = h + "px";
+          void list.offsetHeight;
+          list.classList.remove("is-dd-open");
+          dd.classList.remove("is-dd-open");
+          list.style.maxHeight = "0";
+        }
+      })).observe(list, { attributes: true, attributeFilter: ["class"] });
     });
   }
 
-  // ── INIT ──
-  isScrolled = window.scrollY > SCROLL_THRESHOLD;
-  applyState();
-
-  // ── FIRST-TAP WARMUP ──
-  // iOS WebKit lazily creates GPU compositing layers and JIT-compiles JS on
-  // first execution. This causes a noticeable stutter on the first real tap.
-  // We pre-warm both by forcing a no-op state change cycle that promotes
-  // the compositor layers and exercises the hot code path.
-  function primeForFirstTap() {
-    if (!isMobile()) return;
-
-    // 1. Force layer promotion by triggering a transform on the menu.
-    //    translateZ(0) forces the element onto its own GPU layer.
+  function primeFirstTap() {
     if (navbarMenu) {
       navbarMenu.style.transform = "translate3d(0, 0, 0)";
-      // Force a paint so the layer is actually created
       void navbarMenu.offsetHeight;
     }
     if (navbarComponent) {
       navbarComponent.style.transform = "translate3d(0, 0, 0)";
       void navbarComponent.offsetHeight;
     }
-
-    // 2. JIT warmup: run the toggle logic against a throwaway mock target
-    //    so V8/JSC sees the code path before the user triggers it.
-    //    We don't actually flip state — just exercise the classList ops
-    //    and getComputedStyle reads that happen on real toggle.
     try {
       const _ = navButton.classList.contains("w--open");
       const __ = navbarComponent?.classList.contains("is-m-open");
       const ___ = window.scrollY;
       void _; void __; void ___;
     } catch (e) { /* noop */ }
-
-    // 3. Force a synchronous style recalc so the CSS transitions
-    //    in the injected stylesheet are parsed and applied.
     if (navbarMenu) {
       getComputedStyle(navbarMenu).opacity;
       getComputedStyle(navbarMenu).transition;
     }
   }
 
-  // Run warmup after first paint so it doesn't block initial render
-  if (document.readyState === "complete") {
-    requestAnimationFrame(primeForFirstTap);
-  } else {
-    window.addEventListener("load", () => {
-      requestAnimationFrame(primeForFirstTap);
-    }, { once: true });
+  function init() {
+    body = document.body;
+    navButton = document.querySelector(".w-nav-button");
+    navbarComponent = document.querySelector(".navbar_component");
+    navbarContainer = document.querySelector(".navbar_container");
+    navbarMenu = document.querySelector(".navbar_menu");
+    navOverlay = document.querySelector(".w-nav-overlay");
+
+    if (!navButton || !navbarContainer) return;
+
+    injectStyles();
+    bindNavButton();
+    bindOverlayAndMenu();
+    bindScroll();
+    bindWebflowSync();
+    bindDropdowns();
+
+    isScrolled = window.scrollY > SCROLL_THRESHOLD;
+    applyState();
+
+    if (document.readyState === "complete") {
+      requestAnimationFrame(primeFirstTap);
+    } else {
+      addL(window, "load", () => requestAnimationFrame(primeFirstTap), { once: true });
+    }
   }
 
-  // ── DESTROY ──
-  window.__mobileNavDestroy = function destroy() {
+  function destroy() {
     for (const o of observers) o.disconnect();
-    observers.length = 0;
-    for (const { el, event, handler, options } of trackedListeners) {
+    observers = [];
+    for (const { el, event, handler, options } of listeners) {
       el.removeEventListener(event, handler, options);
     }
-    trackedListeners.length = 0;
-    motionQuery?.removeEventListener?.("change", updateMotion);
+    listeners = [];
 
     resetAllDropdowns();
+    dropdownResets = [];
+
     if (state === STATE.OPEN) unlockBodyScroll();
+    state = STATE.CLOSED;
 
     styleEl?.parentNode?.removeChild(styleEl);
-    navbarComponent?.classList.remove("is-m-open");
-    navbarContainer.classList.remove("is-m-dark");
+    styleEl = null;
 
-    window.__mobileNavInitialized = false;
-  };
+    navbarComponent?.classList.remove("is-m-open");
+    navbarContainer?.classList.remove("is-m-dark");
+
+    if (navbarMenu) navbarMenu.style.transform = "";
+    if (navbarComponent) navbarComponent.style.transform = "";
+
+    body = navButton = navbarComponent = navbarContainer = navbarMenu = navOverlay = null;
+  }
+
+  SHARED.mobileInit = init;
+  SHARED.mobileDestroy = destroy;
 })();
 
 
 /* ═══════════════════════════════════════════════
-   MOBILE CTA — Platform-aware href
+   MOBILE CTA — Platform-aware href (always on)
    ═══════════════════════════════════════════════ */
-
 (() => {
   "use strict";
 
@@ -1747,13 +1285,9 @@
     applyHref(btn);
   }
 
-  // Initial pass
   findAndApply();
 
-  // Re-apply when Webflow re-renders (Editor, CMS, dynamic content)
-  if (window.__ctaHrefObserver) {
-    window.__ctaHrefObserver.disconnect();
-  }
+  if (window.__ctaHrefObserver) window.__ctaHrefObserver.disconnect();
 
   window.__ctaHrefObserver = new MutationObserver((mutations) => {
     for (const m of mutations) {
@@ -1770,8 +1304,5 @@
     }
   });
 
-  window.__ctaHrefObserver.observe(document.body, {
-    childList: true,
-    subtree: true,
-  });
+  window.__ctaHrefObserver.observe(document.body, { childList: true, subtree: true });
 })();
