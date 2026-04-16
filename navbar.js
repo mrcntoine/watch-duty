@@ -1493,7 +1493,9 @@
 
     navbarComponent.classList.remove("is-mobile-open");
     navbarContainer.classList.remove("is-mobile-opening");
-    if (!isScrolled) navbarContainer.classList.remove("is-mobile-dark");
+    // Keep is-mobile-dark through the close animation so the menu's
+    // fade-out and the bg color transition don't overlap. Dark is
+    // released inside the closeTimeout once state is fully CLOSED.
 
     if (navbarMenu) {
       navbarMenu.style.setProperty("opacity", "0", "important");
@@ -1508,14 +1510,30 @@
       body.style.overflow = navButton.classList.contains("w--open")
         ? "hidden"
         : "";
+
+      // Menu fully gone — now sync dark state to scroll position
+      if (!isScrolled) {
+        navbarContainer.classList.remove("is-mobile-dark");
+      }
     }, CLOSE_MS + 50);
   }
 
   // Scroll State
+  // Dark state is locked ON whenever the menu is in any animating or
+  // open phase. Scroll-based toggling only applies when fully closed.
+  // This prevents iOS viewport changes (address-bar collapse) from
+  // restarting the bg-color transition mid-animation.
   function applyScrollState() {
     if (!isMobile()) return;
+
+    const menuEngaged =
+      state === STATE.OPEN ||
+      state === STATE.OPENING ||
+      state === STATE.CLOSING;
+
     const menuOpen = state === STATE.OPEN || state === STATE.OPENING;
-    const dark = menuOpen || isScrolled;
+    const dark = menuEngaged || isScrolled;
+
     navbarComponent?.classList.toggle("is-mobile-open", menuOpen);
     navbarContainer.classList.toggle("is-mobile-dark", dark);
     navbarContainer.classList.toggle("is-mobile-opening", menuOpen);
@@ -1634,7 +1652,16 @@
       requestAnimationFrame(() => {
         const was = isScrolled;
         isScrolled = window.scrollY > SCROLL_THRESHOLD;
-        if (was !== isScrolled) applyScrollState();
+
+        // Skip class thrashing during active menu animation —
+        // iOS fires scroll events during address-bar collapse
+        // which otherwise restart the bg-color transition
+        const menuEngaged =
+          state === STATE.OPEN ||
+          state === STATE.OPENING ||
+          state === STATE.CLOSING;
+
+        if (was !== isScrolled && !menuEngaged) applyScrollState();
         scrollTicking = false;
       });
     },
@@ -1645,10 +1672,20 @@
   addTrackedListener(window, "resize", () => {
     if (!isMobile()) {
       clearMobileStyles();
-    } else {
-      neutralizeMenuTransform();
-      applyScrollState();
+      return;
     }
+
+    neutralizeMenuTransform();
+
+    // Skip applyScrollState during active menu animation —
+    // iOS fires resize events during address-bar collapse which
+    // otherwise thrash the bg-color transition
+    const menuEngaged =
+      state === STATE.OPEN ||
+      state === STATE.OPENING ||
+      state === STATE.CLOSING;
+
+    if (!menuEngaged) applyScrollState();
   });
 
   // Dropdown Slide Animations
