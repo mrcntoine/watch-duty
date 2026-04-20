@@ -28,6 +28,8 @@
 
     activate() {
       const target = this.isMobile() ? "mobile" : "desktop";
+      console.log("[wd-nav] activate() — current:", this.activeMode, "target:", target, "innerWidth:", window.innerWidth);
+
       if (this.activeMode === target) return;
 
       // Graceful close before destroy to prevent visual artifacts
@@ -47,6 +49,8 @@
       } else if (target === "desktop" && this.desktopInit) {
         this.desktopInit();
         this.activeMode = "desktop";
+      } else {
+        console.warn("[wd-nav] no init function available for target:", target);
       }
     },
 
@@ -651,7 +655,9 @@
   }
 
   function bindNavButton() {
+    console.log("[wd-nav] binding touchstart on navButton");
     addL(navButton, "touchstart", (e) => {
+      console.log("[wd-nav] touchstart fired, isMobile:", SHARED.isMobile());
       if (!SHARED.isMobile()) return;
       if (e.touches && e.touches.length !== 1) return;
       lastTouchAt = Date.now();
@@ -717,13 +723,38 @@
   }
 
   function init() {
+    // Log to console so we can debug what's happening
+    console.log("[wd-nav] mobile init() called, readyState:", document.readyState);
+
     body = document.body;
     navButton = document.querySelector(".w-nav-button");
     navbarComponent = document.querySelector(".navbar_component");
     navbarContainer = document.querySelector(".navbar_container");
     navbarMenu = document.querySelector(".navbar_menu");
 
-    if (!navButton || !navbarContainer) return;
+    console.log("[wd-nav] elements found:", {
+      navButton: !!navButton,
+      navbarComponent: !!navbarComponent,
+      navbarContainer: !!navbarContainer,
+      navbarMenu: !!navbarMenu,
+    });
+
+    if (!navButton || !navbarContainer) {
+      console.warn("[wd-nav] required elements missing — will retry when DOM is ready");
+      // Retry once DOM is fully parsed
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", () => {
+          if (SHARED.activeMode === "mobile" && !navButton) init();
+        }, { once: true });
+      } else {
+        // DOM is already parsed — retry after a tick in case elements are injected late
+        setTimeout(() => {
+          if (SHARED.activeMode === "mobile" && !document.querySelector(".w-nav-button")) return;
+          if (SHARED.activeMode === "mobile" && !navButton) init();
+        }, 100);
+      }
+      return;
+    }
 
     injectStyles();
     bindNavButton();
@@ -733,6 +764,8 @@
 
     isScrolled = window.scrollY > SCROLL_THRESHOLD;
     if (isScrolled) navbarContainer.classList.add("is-m-dark");
+
+    console.log("[wd-nav] mobile init complete, listeners bound to", navButton);
   }
 
   function destroy() {
