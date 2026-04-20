@@ -1,3 +1,11 @@
+/* ═══════════════════════════════════════════════
+   WATCH DUTY NAVBAR v3
+   Ruthlessly fast mobile. CSS-only animation.
+   No body scroll lock gymnastics.
+   No MutationObserver spam.
+   No dropdown chrome inside the mobile menu
+   (mobile shows flat link list).
+   ═══════════════════════════════════════════════ */
 
 (() => {
   "use strict";
@@ -7,21 +15,43 @@
 
   const mobileQuery = window.matchMedia("(max-width: 991px)");
 
+  // Track last known viewport width so we can distinguish real viewport
+  // changes from iOS URL-bar show/hide (which changes height, not width).
+  let lastWidth = window.innerWidth;
+  let activateTimer = null;
+
   const shared = {
     mobileQuery,
     isMobile: () => mobileQuery.matches,
     desktopInit: null,
     desktopDestroy: null,
+    desktopOnResize: null,      // per-mode resize handler
     mobileInit: null,
     mobileDestroy: null,
+    mobileOnResize: null,
     activeMode: null,
+
+    // Graceful close hooks — modes can register a "close any open UI first"
+    // callback so we can wait for animations before destroying.
+    desktopGracefulClose: null,
+    mobileGracefulClose: null,
 
     activate() {
       const target = this.isMobile() ? "mobile" : "desktop";
       if (this.activeMode === target) return;
-      if (this.activeMode === "desktop") this.desktopDestroy?.();
-      if (this.activeMode === "mobile") this.mobileDestroy?.();
+
+      // Before tearing down, ask the current mode to close any open UI.
+      // This prevents visual jumps at the breakpoint.
+      if (this.activeMode === "desktop") {
+        this.desktopGracefulClose?.();
+        this.desktopDestroy?.();
+      }
+      if (this.activeMode === "mobile") {
+        this.mobileGracefulClose?.();
+        this.mobileDestroy?.();
+      }
       this.activeMode = null;
+
       if (target === "mobile" && this.mobileInit) {
         this.mobileInit();
         this.activeMode = "mobile";
@@ -31,14 +61,59 @@
       }
     },
 
+    // Called on resize with debouncing. Handles BOTH mode-switching AND
+    // within-mode layout updates (e.g. navbar height changed due to
+    // container width changing).
+    handleResize() {
+      const width = window.innerWidth;
+      const widthChanged = width !== lastWidth;
+      lastWidth = width;
+
+      // iOS URL-bar toggle changes height but not width. If width didn't
+      // change, we don't need to do anything mode-related — and we don't
+      // want to flash the navbar when the URL bar appears.
+      if (!widthChanged) return;
+
+      // Debounce aggressive resize drags (user dragging the window edge)
+      clearTimeout(activateTimer);
+      activateTimer = setTimeout(() => {
+        this.activate();
+        // After (potentially) switching modes, let the active mode update
+        // its own layout in case dimensions changed within the same mode.
+        if (this.activeMode === "desktop") this.desktopOnResize?.();
+        if (this.activeMode === "mobile") this.mobileOnResize?.();
+      }, 100);
+    },
+
     destroyAll() {
+      clearTimeout(activateTimer);
       if (this.activeMode === "desktop") this.desktopDestroy?.();
       if (this.activeMode === "mobile") this.mobileDestroy?.();
       this.activeMode = null;
     },
   };
 
+  // matchMedia change is the authoritative breakpoint signal — fires once
+  // per crossing. But we also need resize for within-mode layout updates
+  // (navbar height, portal position).
   mobileQuery.addEventListener?.("change", () => shared.activate());
+  window.addEventListener("resize", () => shared.handleResize(), { passive: true });
+
+  // visualViewport API gives us better signals on mobile:
+  // - Width changes only fire when actual viewport changes (not URL bar)
+  // - Available in iOS Safari 13+, Chrome 61+, Android WebView
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", () => {
+      shared.handleResize();
+    }, { passive: true });
+  }
+
+  // Orientation change on iOS doesn't always fire resize reliably
+  window.addEventListener("orientationchange", () => {
+    // Wait for orientation to settle before measuring
+    setTimeout(() => shared.handleResize(), 200);
+  }, { passive: true });
+
   window.__wdNavShared = shared;
 
   if (document.readyState === "loading") {
@@ -400,6 +475,49 @@
 
   SHARED.desktopInit = init;
   SHARED.desktopDestroy = destroy;
+
+  // Graceful close: if menu is open, force immediate close (no animation)
+  // so destroy can clean up without animation artifacts.
+  SHARED.desktopGracefulClose = () => {
+    if (isOpen) {
+      cancelClose();
+      cancelPending();
+      isOpen = false;
+      currentDropdown = null;
+      currentList = null;
+      if (pageOverlay) pageOverlay.classList.remove("is-visible");
+      if (dropdownPortal) {
+        dropdownPortal.classList.remove("is-open");
+        dropdownPortal.style.height = "0";
+      }
+      setExpandedSpace(0, 0);
+    }
+  };
+
+  // Resize handler: recompute navbar height and portal position
+  // (container width changes affect navbar height via content wrapping).
+  SHARED.desktopOnResize = () => {
+    if (!navbarContainer) return;
+    // Force re-read of computed styles — they may have changed with viewport
+    const style = getComputedStyle(navbarContainer);
+    originalPaddingBottom = style.paddingBottom || "0px";
+    originalMarginBottom = style.marginBottom || "0px";
+    const newHeight = navbarContainer.offsetHeight;
+    if (newHeight !== originalNavbarHeight) {
+      originalNavbarHeight = newHeight;
+      if (dropdownPortal) dropdownPortal.style.top = `${originalNavbarHeight}px`;
+    }
+    // Invalidate height cache — dropdowns may have reflowed
+    dropdownHeightCache = new WeakMap();
+    morphCache = new WeakMap();
+
+    // If menu is open, resize the portal to match the new dropdown height
+    if (isOpen && currentList) {
+      const h = measureList(currentList);
+      if (dropdownPortal) dropdownPortal.style.height = `${h}px`;
+      setExpandedSpace(h, 0);
+    }
+  };
 })();
 
 
@@ -688,11 +806,42 @@
     styleEl = null;
     navbarComponent?.classList.remove("is-m-open");
     navbarContainer?.classList.remove("is-m-dark");
+
+    // Clean up Webflow's own state — if the mobile menu was open and we're
+    // switching to desktop, Webflow's w--open class on the nav button would
+    // otherwise leak into desktop mode.
+    navButton?.classList.remove("w--open");
+
     body = navButton = navbarComponent = navbarContainer = navbarMenu = null;
   }
 
   SHARED.mobileInit = init;
   SHARED.mobileDestroy = destroy;
+
+  // Graceful close: if menu is open, close it immediately without animation
+  // so destroy/switch to desktop doesn't leave an open menu visually stuck.
+  SHARED.mobileGracefulClose = () => {
+    if (isOpen) {
+      isOpen = false;
+      // Skip the transition on this close — we're about to destroy
+      if (navbarComponent) {
+        navbarComponent.classList.remove("is-m-open");
+      }
+      if (navbarContainer) {
+        navbarContainer.classList.toggle("is-m-dark", isScrolled);
+      }
+    }
+  };
+
+  // Mobile resize: CSS handles layout, but re-check scroll state in case
+  // threshold crossing happened during resize
+  SHARED.mobileOnResize = () => {
+    if (!navbarContainer) return;
+    isScrolled = window.scrollY > SCROLL_THRESHOLD;
+    if (!isOpen) {
+      navbarContainer.classList.toggle("is-m-dark", isScrolled);
+    }
+  };
 })();
 
 
