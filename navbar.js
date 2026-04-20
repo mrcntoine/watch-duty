@@ -1,12 +1,11 @@
 /* ═══════════════════════════════════════════════
-   WATCH DUTY NAVBAR v3
-   Ruthlessly fast mobile. CSS-only animation.
-   No body scroll lock gymnastics.
-   No MutationObserver spam.
-   No dropdown chrome inside the mobile menu
-   (mobile shows flat link list).
+   WATCH DUTY NAVBAR
+   Exclusive-mode architecture. Robust across resizes.
    ═══════════════════════════════════════════════ */
 
+/* ───────────────────────────────────────────────
+   SHARED: viewport detection + mode arbitration
+   ─────────────────────────────────────────────── */
 (() => {
   "use strict";
   if (window.__wdNavShared) {
@@ -14,34 +13,24 @@
   }
 
   const mobileQuery = window.matchMedia("(max-width: 991px)");
-
-  // Track last known viewport width so we can distinguish real viewport
-  // changes from iOS URL-bar show/hide (which changes height, not width).
   let lastWidth = window.innerWidth;
-  let activateTimer = null;
 
   const shared = {
     mobileQuery,
     isMobile: () => mobileQuery.matches,
     desktopInit: null,
     desktopDestroy: null,
-    desktopOnResize: null,      // per-mode resize handler
+    desktopGracefulClose: null,
     mobileInit: null,
     mobileDestroy: null,
-    mobileOnResize: null,
-    activeMode: null,
-
-    // Graceful close hooks — modes can register a "close any open UI first"
-    // callback so we can wait for animations before destroying.
-    desktopGracefulClose: null,
     mobileGracefulClose: null,
+    activeMode: null,
 
     activate() {
       const target = this.isMobile() ? "mobile" : "desktop";
       if (this.activeMode === target) return;
 
-      // Before tearing down, ask the current mode to close any open UI.
-      // This prevents visual jumps at the breakpoint.
+      // Graceful close before destroy to prevent visual artifacts
       if (this.activeMode === "desktop") {
         this.desktopGracefulClose?.();
         this.desktopDestroy?.();
@@ -61,57 +50,27 @@
       }
     },
 
-    // Called on resize with debouncing. Handles BOTH mode-switching AND
-    // within-mode layout updates (e.g. navbar height changed due to
-    // container width changing).
-    handleResize() {
-      const width = window.innerWidth;
-      const widthChanged = width !== lastWidth;
-      lastWidth = width;
-
-      // iOS URL-bar toggle changes height but not width. If width didn't
-      // change, we don't need to do anything mode-related — and we don't
-      // want to flash the navbar when the URL bar appears.
-      if (!widthChanged) return;
-
-      // Debounce aggressive resize drags (user dragging the window edge)
-      clearTimeout(activateTimer);
-      activateTimer = setTimeout(() => {
-        this.activate();
-        // After (potentially) switching modes, let the active mode update
-        // its own layout in case dimensions changed within the same mode.
-        if (this.activeMode === "desktop") this.desktopOnResize?.();
-        if (this.activeMode === "mobile") this.mobileOnResize?.();
-      }, 100);
-    },
-
     destroyAll() {
-      clearTimeout(activateTimer);
       if (this.activeMode === "desktop") this.desktopDestroy?.();
       if (this.activeMode === "mobile") this.mobileDestroy?.();
       this.activeMode = null;
     },
   };
 
-  // matchMedia change is the authoritative breakpoint signal — fires once
-  // per crossing. But we also need resize for within-mode layout updates
-  // (navbar height, portal position).
+  // matchMedia.change is the AUTHORITATIVE signal for breakpoint crossing.
+  // Fires exactly once per crossing. This is what drives mode switching.
   mobileQuery.addEventListener?.("change", () => shared.activate());
-  window.addEventListener("resize", () => shared.handleResize(), { passive: true });
 
-  // visualViewport API gives us better signals on mobile:
-  // - Width changes only fire when actual viewport changes (not URL bar)
-  // - Available in iOS Safari 13+, Chrome 61+, Android WebView
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener("resize", () => {
-      shared.handleResize();
-    }, { passive: true });
-  }
-
-  // Orientation change on iOS doesn't always fire resize reliably
-  window.addEventListener("orientationchange", () => {
-    // Wait for orientation to settle before measuring
-    setTimeout(() => shared.handleResize(), 200);
+  // Secondary: listen for resize to catch width-only changes (e.g. iOS
+  // URL bar show/hide changes height but NOT width — we ignore those).
+  // This doesn't switch modes; it just lets the active mode know layout
+  // may have shifted.
+  window.addEventListener("resize", () => {
+    const width = window.innerWidth;
+    if (width === lastWidth) return; // height-only change, ignore
+    lastWidth = width;
+    // matchMedia change listener handles actual breakpoint crossings.
+    // We don't need to call activate() here.
   }, { passive: true });
 
   window.__wdNavShared = shared;
@@ -125,7 +84,7 @@
 
 
 /* ═══════════════════════════════════════════════
-   DESKTOP NAV (≥992px) — unchanged from v2
+   DESKTOP NAV (≥992px)
    ═══════════════════════════════════════════════ */
 (() => {
   "use strict";
@@ -175,6 +134,7 @@
   let boundListeners = [], styleElement = null;
   let dropdownListMap = new Map(), dropdownHeightCache = new WeakMap(), morphCache = new WeakMap();
   let lastScrollY = 0, scrollTicking = false;
+  let resizeTimeout = null;
 
   const MORPH_SELECTORS = [".dropdown-grid-left", ".dropdown-grid-right", ".dropdown-grid-app", ".dropdown-content-wrapper"];
 
@@ -327,6 +287,35 @@
       update(getScrollTop());
     }
   }
+  // Internal resize listener — handles within-desktop layout updates
+  // (e.g. navbar height changing due to content wrapping at different widths).
+  // Does NOT handle mode switching — matchMedia.change does that.
+  function bindResizeListener() {
+    addL(window, "resize", () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        if (!navbarContainer) return;
+        // Re-read dimensions in case container width changed
+        const style = getComputedStyle(navbarContainer);
+        originalPaddingBottom = style.paddingBottom || "0px";
+        originalMarginBottom = style.marginBottom || "0px";
+        const newHeight = navbarContainer.offsetHeight;
+        if (newHeight !== originalNavbarHeight) {
+          originalNavbarHeight = newHeight;
+          if (dropdownPortal) dropdownPortal.style.top = `${originalNavbarHeight}px`;
+        }
+        // Dropdowns may have reflowed
+        dropdownHeightCache = new WeakMap();
+        morphCache = new WeakMap();
+        // If a dropdown is open, re-measure and update portal height
+        if (isOpen && currentList) {
+          const h = measureList(currentList);
+          if (dropdownPortal) dropdownPortal.style.height = `${h}px`;
+          setExpandedSpace(h, 0);
+        }
+      }, 150);
+    }, { passive: true });
+  }
   function cancelClose() { if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; } }
   function requestClose() { cancelClose(); closeTimer = setTimeout(closeMenu, CONFIG.closeDelayMs); }
   function cancelPending() { if (switchTimeout) { clearTimeout(switchTimeout); switchTimeout = null; } if (closeFallbackTimeout) { clearTimeout(closeFallbackTimeout); closeFallbackTimeout = null; } }
@@ -437,7 +426,7 @@
       allToggles = Array.from(document.querySelectorAll(".navbar_menu-dropdown .navbar_dropdwn-toggle"));
       injectStyles(); createOverlay(); createPortal(); createMeasureContainer();
       prepareDropdowns(); disableWebflowBehavior(); enhanceToggleA11y();
-      bindEvents(); bindScrollListener();
+      bindEvents(); bindScrollListener(); bindResizeListener();
       allDropdownLists = Array.from(dropdownPortal.querySelectorAll(".navbar_dropdown-list"));
       requestAnimationFrame(() => { applyTransitions(0); applyTheme(); requestAnimationFrame(() => applyTransitions(CONFIG.closeMs)); });
     });
@@ -445,6 +434,7 @@
   }
   function destroy() {
     cancelClose(); cancelPending();
+    clearTimeout(resizeTimeout);
     motionQuery?.removeEventListener?.("change", applyMotion);
     dropdownListMap.forEach((list, dd) => { if (list && dd && list.parentNode === dropdownPortal) dd.appendChild(list); });
     dropdownListMap.clear(); morphCache = new WeakMap();
@@ -476,12 +466,11 @@
   SHARED.desktopInit = init;
   SHARED.desktopDestroy = destroy;
 
-  // Graceful close: if menu is open, force immediate close (no animation)
-  // so destroy can clean up without animation artifacts.
+  // Graceful close before mode switch — force-close any open dropdown
+  // instantly (no animation) so we don't leave visual artifacts.
   SHARED.desktopGracefulClose = () => {
     if (isOpen) {
-      cancelClose();
-      cancelPending();
+      cancelClose(); cancelPending();
       isOpen = false;
       currentDropdown = null;
       currentList = null;
@@ -490,32 +479,6 @@
         dropdownPortal.classList.remove("is-open");
         dropdownPortal.style.height = "0";
       }
-      setExpandedSpace(0, 0);
-    }
-  };
-
-  // Resize handler: recompute navbar height and portal position
-  // (container width changes affect navbar height via content wrapping).
-  SHARED.desktopOnResize = () => {
-    if (!navbarContainer) return;
-    // Force re-read of computed styles — they may have changed with viewport
-    const style = getComputedStyle(navbarContainer);
-    originalPaddingBottom = style.paddingBottom || "0px";
-    originalMarginBottom = style.marginBottom || "0px";
-    const newHeight = navbarContainer.offsetHeight;
-    if (newHeight !== originalNavbarHeight) {
-      originalNavbarHeight = newHeight;
-      if (dropdownPortal) dropdownPortal.style.top = `${originalNavbarHeight}px`;
-    }
-    // Invalidate height cache — dropdowns may have reflowed
-    dropdownHeightCache = new WeakMap();
-    morphCache = new WeakMap();
-
-    // If menu is open, resize the portal to match the new dropdown height
-    if (isOpen && currentList) {
-      const h = measureList(currentList);
-      if (dropdownPortal) dropdownPortal.style.height = `${h}px`;
-      setExpandedSpace(h, 0);
     }
   };
 })();
@@ -528,7 +491,6 @@
   "use strict";
   const SHARED = window.__wdNavShared;
 
-  // Fast timings
   const OPEN_MS = 200;
   const CLOSE_MS = 160;
   const EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
@@ -556,12 +518,8 @@
 
     styleEl = document.createElement("style");
     styleEl.id = "wd-navbar-mobile-styles";
-    // ULTRA-MINIMAL stylesheet. Only what's absolutely needed.
-    // Only opacity + background-color animate (both GPU-composited).
-    // No backdrop-filter, no max-height, no transform animation.
     styleEl.textContent = `
 @media (max-width: 991px) {
-  /* Override any desktop-leftover inline styles */
   .navbar_container {
     padding-bottom: 0 !important;
     margin-bottom: 0 !important;
@@ -571,14 +529,12 @@
     max-width: 100% !important;
   }
 
-  /* Hide desktop-only chrome */
   .navbar-dropdown-portal,
   .navbar-measure-container,
   .nav-page-overlay {
     display: none !important;
   }
 
-  /* Menu starts hidden, becomes visible — no transforms, just opacity */
   .navbar_menu {
     opacity: 0;
     visibility: hidden;
@@ -596,7 +552,6 @@
     transition: opacity ${OPEN_MS}ms ${EASE};
   }
 
-  /* Background fades in sync with menu */
   .navbar_component,
   .navbar_container {
     background-color: transparent;
@@ -610,7 +565,6 @@
     background-color: #000 !important;
   }
 
-  /* Text colors */
   .navbar_logo,
   .navbar_link,
   .navbar_dropdwn-toggle,
@@ -638,7 +592,6 @@
       border-color ${OPEN_MS}ms ${EASE} !important;
   }
 
-  /* Dark palette for scrolled/open */
   .navbar_container.is-m-dark .navbar_logo,
   .navbar_container.is-m-dark .navbar_link,
   .navbar_container.is-m-dark .navbar_dropdwn-toggle {
@@ -657,7 +610,6 @@
     background-color: #fff !important;
   }
 
-  /* Menu-interior color normalization */
   .navbar_menu .navbar_dropdwn-toggle,
   .navbar_menu .navbar_dropdwn-toggle *,
   .navbar_menu .navbar_dropdown-list,
@@ -666,7 +618,6 @@
     background-color: inherit !important;
   }
 
-  /* Fastest possible tap response */
   .w-nav-button,
   .navbar_dropdwn-toggle,
   .navbar_link {
@@ -678,9 +629,6 @@
     document.head.appendChild(styleEl);
   }
 
-  // ── THE ONLY THING THAT HAPPENS ON TAP ──
-  // No scroll lock. No dropdown reset loop. No observer firing.
-  // Just flip two classes. That's it.
   function applyOpenState() {
     if (isOpen) {
       navbarComponent.classList.add("is-m-open");
@@ -703,7 +651,6 @@
   }
 
   function bindNavButton() {
-    // touchstart = fastest possible response on iOS
     addL(navButton, "touchstart", (e) => {
       if (!SHARED.isMobile()) return;
       if (e.touches && e.touches.length !== 1) return;
@@ -712,7 +659,6 @@
       e.preventDefault();
     }, { capture: true, passive: false });
 
-    // Swallow everything that follows — Webflow's own click handler, etc.
     addL(navButton, "click", (e) => {
       if (!SHARED.isMobile()) return;
       if (Date.now() - lastTouchAt < TOUCH_DEDUPE_MS) {
@@ -720,7 +666,6 @@
         e.stopImmediatePropagation();
         return;
       }
-      // Pure mouse fallback
       e.preventDefault();
       e.stopImmediatePropagation();
       toggleMenu();
@@ -736,7 +681,6 @@
   }
 
   function bindMenuLinks() {
-    // Close when tapping a link inside the menu
     if (!navbarMenu) return;
     addL(navbarMenu, "click", (e) => {
       if (!SHARED.isMobile() || !isOpen) return;
@@ -762,8 +706,6 @@
   }
 
   function bindWebflowFallback() {
-    // ONE observer only. Fires only if someone else toggles w--open
-    // (keyboard, assistive tech). Ignores our own toggles.
     wfObserver = new MutationObserver(() => {
       if (!SHARED.isMobile()) return;
       if (Date.now() - lastTouchAt < TOUCH_DEDUPE_MS) return;
@@ -789,7 +731,6 @@
     bindScroll();
     bindWebflowFallback();
 
-    // Initial scroll state
     isScrolled = window.scrollY > SCROLL_THRESHOLD;
     if (isScrolled) navbarContainer.classList.add("is-m-dark");
   }
@@ -807,9 +748,7 @@
     navbarComponent?.classList.remove("is-m-open");
     navbarContainer?.classList.remove("is-m-dark");
 
-    // Clean up Webflow's own state — if the mobile menu was open and we're
-    // switching to desktop, Webflow's w--open class on the nav button would
-    // otherwise leak into desktop mode.
+    // Clean Webflow's state so it doesn't leak into desktop mode
     navButton?.classList.remove("w--open");
 
     body = navButton = navbarComponent = navbarContainer = navbarMenu = null;
@@ -818,28 +757,15 @@
   SHARED.mobileInit = init;
   SHARED.mobileDestroy = destroy;
 
-  // Graceful close: if menu is open, close it immediately without animation
-  // so destroy/switch to desktop doesn't leave an open menu visually stuck.
+  // Graceful close before destroy — force-close menu instantly so
+  // mode transition doesn't leave a half-open menu visible
   SHARED.mobileGracefulClose = () => {
-    if (isOpen) {
+    if (isOpen && navbarComponent) {
       isOpen = false;
-      // Skip the transition on this close — we're about to destroy
-      if (navbarComponent) {
-        navbarComponent.classList.remove("is-m-open");
+      navbarComponent.classList.remove("is-m-open");
+      if (navbarContainer && !isScrolled) {
+        navbarContainer.classList.remove("is-m-dark");
       }
-      if (navbarContainer) {
-        navbarContainer.classList.toggle("is-m-dark", isScrolled);
-      }
-    }
-  };
-
-  // Mobile resize: CSS handles layout, but re-check scroll state in case
-  // threshold crossing happened during resize
-  SHARED.mobileOnResize = () => {
-    if (!navbarContainer) return;
-    isScrolled = window.scrollY > SCROLL_THRESHOLD;
-    if (!isOpen) {
-      navbarContainer.classList.toggle("is-m-dark", isScrolled);
     }
   };
 })();
