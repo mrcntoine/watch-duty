@@ -540,20 +540,54 @@
   }
 
   .navbar_menu {
+    /* Override Webflow's @media (max-width: 991px) { .w-nav-menu { display: none } } */
+    display: block !important;
+
+    /* Full-viewport overlay positioning */
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important; /* dynamic viewport height — respects iOS URL bar */
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 80px 24px 24px !important; /* top padding clears the fixed navbar */
+    box-sizing: border-box !important;
+    background: #000 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    z-index: 900 !important;
+
+    /* Fade animation */
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition: opacity ${CLOSE_MS}ms ${EASE};
-    width: 100vw !important;
-    max-width: none !important;
-    margin-left: calc(-50vw + 50%) !important;
-    box-sizing: border-box !important;
+    transition: opacity ${CLOSE_MS}ms ${EASE}, visibility 0s linear ${CLOSE_MS}ms;
   }
   .navbar_component.is-m-open .navbar_menu {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
-    transition: opacity ${OPEN_MS}ms ${EASE};
+    transition: opacity ${OPEN_MS}ms ${EASE}, visibility 0s linear 0s;
+  }
+
+  /* Menu items inside — stack vertically, readable on dark bg */
+  .navbar_menu .navbar_menu-dropdown {
+    display: block !important;
+    width: 100% !important;
+    margin-bottom: 8px !important;
+  }
+  .navbar_menu .navbar_dropdwn-toggle {
+    display: flex !important;
+    width: 100% !important;
+    padding: 16px 0 !important;
+    color: #fff !important;
+    font-size: 1.25rem !important;
+    justify-content: space-between !important;
+    align-items: center !important;
   }
 
   .navbar_component,
