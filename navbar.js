@@ -46,6 +46,14 @@
       },
     },
 
+    darkVariantColors: {
+      top: {
+        navbarBg: "var(--_primitives---colors--dark-tertiary)",
+        textColor: "var(--color-scheme-1--text-light)",
+        elementBg: "rgba(255, 255, 255, 0.1)",
+      },
+    },
+
     mobileDropdown: {
       openMs: 450,
       closeMs: 350,
@@ -124,6 +132,7 @@
 
     let isScrolled = false;
     let isOpen = false;
+    let isDarkVariant = false;
     let currentDropdown = null;
     let currentList = null;
 
@@ -252,7 +261,8 @@
     }
 
     function getTheme() {
-      return isOpen || isScrolled ? CONFIG.colors.scrolled : CONFIG.colors.top;
+      if (isOpen || isScrolled) return CONFIG.colors.scrolled;
+      return isDarkVariant ? CONFIG.darkVariantColors.top : CONFIG.colors.top;
     }
 
     function applyTheme() {
@@ -837,6 +847,10 @@
 
       window.__navbarAnimationInitialized = true;
 
+      const navbarComponent = document.querySelector(".navbar_component");
+      isDarkVariant =
+        navbarComponent?.getAttribute("data-wf--navbar--variant") === "dark";
+
       const style = getComputedStyle(navbarContainer);
       originalPaddingBottom = style.paddingBottom || "0px";
       originalMarginBottom = style.marginBottom || "0px";
@@ -944,6 +958,7 @@
 
       isScrolled = false;
       isOpen = false;
+      isDarkVariant = false;
       currentDropdown = null;
       currentList = null;
       smoothScrollInstance = null;
